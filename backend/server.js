@@ -57,13 +57,12 @@ const ClientSchema = new mongoose.Schema({
 });
 const Client = mongoose.model('Client', ClientSchema);
 
-// --- MODIFICATION MAJEURE : Schéma de sondage amélioré ---
 const SurveySchema = new mongoose.Schema({
   title: { type: String, required: true },
   questions: [{
     text: { type: String, required: true },
     type: { type: String, enum: ['text', 'mcq'], required: true, default: 'text' },
-    options: [{ type: String }] // Options pour les questions de type 'mcq'
+    options: [{ type: String }]
   }],
   responses: [{
     clientName: String,
@@ -126,7 +125,7 @@ app.get('/api/clients', authMiddleware, async (req, res) => { try { const client
 app.post('/api/surveys', authMiddleware, async (req, res) => { try { const { title, questions } = req.body; const newSurvey = new Survey({ title, questions, companyId: req.company.id }); await newSurvey.save(); res.status(201).json(newSurvey); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
 app.get('/api/surveys', authMiddleware, async (req, res) => { try { const surveys = await Survey.find({ companyId: req.company.id }).select('-responses'); res.json(surveys); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
 
-// --- MODIFICATION MAJEURE : Route des résultats avec calcul des statistiques ---
+// --- Route des résultats de sondage ---
 app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
     try {
         const survey = await Survey.findOne({ _id: req.params.id, companyId: req.company.id });
@@ -137,20 +136,15 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
             title: survey.title,
             questions: survey.questions,
             responses: survey.responses,
-            stats: {} // Nouvel objet pour les statistiques
+            stats: {}
         };
 
-        // On calcule les statistiques pour chaque question de type 'mcq'
         survey.questions.forEach((question, index) => {
             if (question.type === 'mcq') {
                 const questionStats = {};
-                // Initialise un compteur pour chaque option de la question
                 question.options.forEach(option => { questionStats[option] = 0; });
-
-                // On parcourt toutes les réponses au sondage
                 survey.responses.forEach(response => {
                     const answer = response.answers[index];
-                    // Si la réponse correspond à une option valide, on incrémente
                     if (questionStats.hasOwnProperty(answer)) {
                         questionStats[answer]++;
                     }
@@ -158,7 +152,6 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
                 results.stats[index] = questionStats;
             }
         });
-
         res.json(results);
     } catch (error) {
         res.status(500).json({ message: 'Erreur du serveur', error: error.message });
@@ -170,36 +163,71 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
     try {
         const company = await Company.findById(req.company.id);
         if (!company) { return res.status(404).json({ message: "Entreprise non trouvée." }); }
+        
         const { message, surveyId, channel, recipientType, status, clientIds } = req.body;
+        
         let recipients = [];
         if (recipientType === 'all') { recipients = await Client.find({ companyId: req.company.id }); }
         else if (recipientType === 'status') { recipients = await Client.find({ companyId: req.company.id, status }); }
         else if (recipientType === 'selection') { recipients = await Client.find({ _id: { $in: clientIds }, companyId: req.company.id }); }
+        
         if (recipients.length === 0) { return res.status(400).json({ message: "Aucun destinataire trouvé." }); }
         
-        let contentToSend = '';
-        if (message) { 
-            contentToSend = message; 
-        } else if (surveyId) { 
-            const survey = await Survey.findById(surveyId);
-            contentToSend = `Bonjour, veuillez répondre à notre sondage "${survey.title}" ici: http://localhost:3000/survey/${survey._id}`; 
-        }
-
         if (channel === 'email') {
+            let contentToSend = '';
+            if (message) { 
+                contentToSend = message; 
+            } else if (surveyId) { 
+                const survey = await Survey.findById(surveyId);
+                // Mettez ici l'URL de votre frontend déployé
+                contentToSend = `Bonjour, veuillez répondre à notre sondage "${survey.title}" ici: https://VOTRE-FRONTEND.com/survey/${survey._id}`; 
+            }
+
             const appPassword = decrypt(company.emailAppPassword);
             if (!appPassword) return res.status(400).json({ message: "Veuillez configurer votre mot de passe d'application Gmail." });
+            
             const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: company.email, pass: appPassword }});
             const emailPromises = recipients.map(r => transporter.sendMail({ from: `"${company.name}" <${company.email}>`, to: r.email, subject: `Message de ${company.name}`, text: contentToSend }));
             await Promise.all(emailPromises);
+
         } else if (channel === 'whatsapp') {
+            // ================== DÉBUT DE LA MODIFICATION ==================
+            // On ne peut envoyer que des sondages via un modèle pour initier une conversation.
+            if (!surveyId) {
+                return res.status(400).json({ message: "Pour initier une conversation WhatsApp, vous devez envoyer un sondage via un modèle approuvé." });
+            }
+
             const sid = decrypt(company.twilioSid);
             const token = decrypt(company.twilioToken);
             const fromNumber = decrypt(company.twilioWhatsappNumber);
             if (!sid || !token || !fromNumber) return res.status(400).json({ message: "Veuillez configurer vos identifiants Twilio." });
+            
             const twilioClient = twilio(sid, token);
-            const whatsappPromises = recipients.map(r => twilioClient.messages.create({ from: `whatsapp:${fromNumber}`, to: `whatsapp:${r.whatsapp}`, body: contentToSend }));
+            const survey = await Survey.findById(surveyId);
+            
+            // !! IMPORTANT !! Remplacez cette URL par l'URL de votre application frontend une fois déployée.
+            const surveyUrl = `https://votre-app.onrender.com/survey/${survey._id}`; 
+
+            const whatsappPromises = recipients.map(r => twilioClient.messages.create({
+                from: `whatsapp:${fromNumber}`,
+                to: `whatsapp:${r.whatsapp}`,
+                
+                // On utilise le modèle avec son ID (ContentSid)
+                // Cet ID est celui que vous avez récupéré sur la console Twilio
+                contentSid: 'HX51def29a7eb44975d06c20de1e33ff70',
+                
+                // Et on remplit les variables correspondantes du modèle
+                contentVariables: JSON.stringify({
+                    '1': company.name, // Variable {{1}} pour le nom de l'entreprise
+                    '2': survey.title, // Variable {{2}} pour le titre du sondage
+                    '3': surveyUrl     // Variable {{3}} pour le lien du sondage
+                })
+            }));
+
             await Promise.all(whatsappPromises);
+            // =================== FIN DE LA MODIFICATION ===================
         }
+
         res.json({ success: true, message: `Communication envoyée via ${channel.toUpperCase()} à ${recipients.length} client(s).` });
     } catch (error) {
         console.error("ERREUR D'ENVOI:", error);
