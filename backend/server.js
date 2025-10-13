@@ -196,7 +196,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             const whatsappPromises = recipients.map(r => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
                 to: `whatsapp:${r.whatsapp}`,
-                contentSid: 'HX51def29a7eb44975d06c20de1e33ff70',
+                contentSid: 'HX132fe266db19e5cfce7128dc6a2ec4f6',
                 
                 // ================== CORRECTION FINALE APPLIQUÉE ICI ==================
                 // On ne passe QUE les variables 2 et 3, car la 1 est en dur dans le modèle.
