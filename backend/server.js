@@ -166,6 +166,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             if (message) {  contentToSend = message; } 
             else if (surveyId) { 
                 const survey = await Survey.findById(surveyId);
+                if (!survey) return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
                 contentToSend = `Bonjour, veuillez répondre à notre sondage "${survey.title}" ici: https://VOTRE-FRONTEND.com/survey/${survey._id}`; 
             }
             const appPassword = decrypt(company.emailAppPassword);
@@ -183,23 +184,27 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             if (!sid || !token || !fromNumber) return res.status(400).json({ message: "Veuillez configurer vos identifiants Twilio." });
             
             const twilioClient = twilio(sid, token);
-            const survey = await Survey.findById(surveyId);
             
-            const surveyUrl = `https://votre-app.onrender.com/survey/${survey._id}`; 
+            const survey = await Survey.findById(surveyId);
+            if (!survey) {
+                return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
+            }
+            
+            // !! IMPORTANT !! Remplacez cette URL par la VRAIE URL de votre frontend.
+            const surveyUrl = `https://votre-app-frontend.onrender.com/survey/${survey._id}`; 
 
             const whatsappPromises = recipients.map(r => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
                 to: `whatsapp:${r.whatsapp}`,
                 contentSid: 'HX51def29a7eb44975d06c20de1e33ff70',
                 
-                // ================== CORRECTION APPLIQUÉE ICI ==================
-                // On retire JSON.stringify et on passe l'objet directement.
-                contentVariables: {
-                    '1': company.name,
-                    '2': survey.title,
-                    '3': surveyUrl
-                }
-                // =============================================================
+                // ================== CORRECTION FINALE APPLIQUÉE ICI ==================
+                // On ne passe QUE les variables 2 et 3, car la 1 est en dur dans le modèle.
+                contentVariables: JSON.stringify({
+                    '2': survey.title, // Variable {{2}} pour le titre du sondage
+                    '3': surveyUrl     // Variable {{3}} pour le lien du sondage
+                })
+                // ====================================================================
             }));
 
             await Promise.all(whatsappPromises);
