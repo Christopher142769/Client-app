@@ -167,7 +167,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             else if (surveyId) { 
                 const survey = await Survey.findById(surveyId);
                 if (!survey) return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
-                contentToSend = `Bonjour, veuillez répondre à notre sondage "${survey.title}" ici: https://VOTRE-FRONTEND.com/survey/${survey._id}`; 
+                contentToSend = `Bonjour, veuillez répondre à notre sondage "${survey.title}" ici: https://client-app-j02r.onrender.com/survey/${survey._id}`; 
             }
             const appPassword = decrypt(company.emailAppPassword);
             if (!appPassword) return res.status(400).json({ message: "Veuillez configurer votre mot de passe d'application Gmail." });
@@ -191,7 +191,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             }
             
             // !! IMPORTANT !! Remplacez cette URL par la VRAIE URL de votre frontend.
-            const surveyUrl = `https://votre-app-frontend.onrender.com/survey/${survey._id}`; 
+            const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`; 
 
             const whatsappPromises = recipients.map(r => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
