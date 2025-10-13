@@ -4,11 +4,10 @@ import { Form, Button, Container, Card, Alert, Navbar, Nav, Modal, ListGroup, Ta
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
-// --- NOUVELLES IMPORTATIONS "DE FOU MALADE" ---
+// --- NOUVELLES IMPORTATIONS ---
 import { motion, AnimatePresence } from 'framer-motion';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-// import Joyride, { STATUS } from 'react-joyride'; // LIGNE SUPPRIMÉE
 import {
   FaPlus, FaTrash, FaChartPie, FaUserPlus, FaWpforms, FaPaperPlane,
   FaCog, FaSignOutAlt, FaEye, FaEnvelope, FaLock, FaBuilding, FaWhatsapp, FaKey, FaSignature, FaQuestionCircle
@@ -20,7 +19,7 @@ ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarEle
 
 
 // --- CONFIGURATION D'AXIOS ---
-const api = axios.create({ baseURL: 'http://localhost:5000/api' });
+const api = axios.create({ baseURL: 'https://client-back-rxhc.onrender.com/api' });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) { config.headers.Authorization = `Bearer ${token}`; }
@@ -401,11 +400,8 @@ function Settings() {
 function Dashboard() {
   const [clients, setClients] = useState([]); const [surveys, setSurveys] = useState([]);
   const [showClientModal, setShowClientModal] = useState(false); const [showSurveyModal, setShowSurveyModal] = useState(false); const [showCommunicationModal, setShowCommunicationModal] = useState(false); const [showResultsModal, setShowResultsModal] = useState(false); const [selectedSurveyId, setSelectedSurveyId] = useState(null);
-  // const [runTour, setRunTour] = useState(false); // Ligne à supprimer
-  // const [tourSteps] = useState([ ... ]); // Bloc à supprimer
   
   useEffect(() => {
-    // Logique pour le tour guidé à ré-implémenter avec react-shepherd si besoin
     const fetchData = async () => {
         try {
             const [clientsRes, surveysRes] = await Promise.all([api.get('/clients'), api.get('/surveys')]);
@@ -419,7 +415,6 @@ function Dashboard() {
 
   return (
     <>
-      {/* <Joyride ... /> */} {/* Ligne à supprimer */}
       <AppNavbar />
       <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
       <Container fluid className="p-4">
@@ -443,9 +438,9 @@ function Dashboard() {
         <motion.div variants={cardVariants} initial="offscreen" whileInView="onscreen" viewport={{ once: true, amount: 0.5 }}>
             <Card className="shadow-sm border-0 mb-4">
                 <Card.Body className="text-center">
-                    <Button variant="primary" size="lg" onClick={() => setShowClientModal(true)} className="m-2 tour-step-1"><FaUserPlus className="me-2"/> Ajouter Client</Button>
-                    <Button variant="success" size="lg" onClick={() => setShowSurveyModal(true)} className="m-2 tour-step-2"><FaWpforms className="me-2"/>Créer Sondage</Button>
-                    <Button variant="info" size="lg" onClick={() => setShowCommunicationModal(true)} className="m-2 tour-step-3 text-white"><FaPaperPlane className="me-2"/>Envoyer Communication</Button>
+                    <Button variant="primary" size="lg" onClick={() => setShowClientModal(true)} className="m-2"><FaUserPlus className="me-2"/> Ajouter Client</Button>
+                    <Button variant="success" size="lg" onClick={() => setShowSurveyModal(true)} className="m-2"><FaWpforms className="me-2"/>Créer Sondage</Button>
+                    <Button variant="info" size="lg" onClick={() => setShowCommunicationModal(true)} className="m-2 text-white"><FaPaperPlane className="me-2"/>Envoyer Communication</Button>
                 </Card.Body>
             </Card>
         </motion.div>
@@ -487,7 +482,7 @@ function PublicSurvey() {
     useEffect(() => {
         const fetchSurvey = async () => {
             try {
-                const { data } = await axios.get(`http://localhost:5000/api/public/surveys/${surveyId}`);
+                const { data } = await axios.get(`https://client-back-rxhc.onrender.com/api/public/surveys/${surveyId}`);
                 setSurvey(data);
                 setAnswers(new Array(data.questions.length).fill(''));
             } catch (err) { setError("Sondage introuvable ou erreur de chargement."); }
@@ -505,14 +500,13 @@ function PublicSurvey() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            await axios.post(`http://localhost:5000/api/public/surveys/${surveyId}/responses`, { clientName, answers });
+            await axios.post(`https://client-back-rxhc.onrender.com/api/public/surveys/${surveyId}/responses`, { clientName, answers });
             setSubmitted(true);
         } catch (err) { toast.error("Erreur lors de l'envoi de vos réponses."); }
     };
 
     if (loading) return <Container className="text-center mt-5 vh-100 d-flex align-items-center justify-content-center"><Spinner animation="border" variant="primary" style={{width: '3rem', height: '3rem'}} /></Container>;
     
-    // CORRECTION : On affiche l'erreur si elle existe
     if (error) return <Container className="mt-5"><Alert variant="danger">{error}</Alert></Container>;
 
     if (submitted) return (
@@ -572,13 +566,13 @@ const AppNavbar = () => {
     };
 
     return (
-        <Navbar bg="_dark" variant="dark" expand="lg" sticky="top" className="shadow-sm">
+        <Navbar bg="dark" variant="dark" expand="lg" sticky="top" className="shadow-sm">
             <Container fluid>
                 <Navbar.Brand as={Link} to="/dashboard" className="fw-bold">{companyName}</Navbar.Brand>
                 <Navbar.Toggle aria-controls="basic-navbar-nav" />
                 <Navbar.Collapse id="basic-navbar-nav">
                     <Nav className="me-auto">
-                        <Nav.Link as={Link} to="/settings" className="tour-step-4"><FaCog className="me-1"/>Paramètres</Nav.Link>
+                        <Nav.Link as={Link} to="/settings"><FaCog className="me-1"/>Paramètres</Nav.Link>
                     </Nav>
                     <Button variant="outline-danger" onClick={handleLogout}><FaSignOutAlt className="me-1"/>Déconnexion</Button>
                 </Navbar.Collapse>
@@ -625,4 +619,3 @@ function App() {
 }
 
 export default App;
-
