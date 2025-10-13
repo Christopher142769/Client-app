@@ -197,7 +197,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             const fromNumber = decrypt(company.twilioWhatsappNumber);
             if (!sid || !token || !fromNumber) return res.status(400).json({ message: "Veuillez configurer vos identifiants Twilio." });
             const twilioClient = twilio(sid, token);
-            const whatsappPromises = recipients.map(r => twilioClient.messages.create({ from: fromNumber, to: `whatsapp:${r.whatsapp}`, body: contentToSend }));
+            const whatsappPromises = recipients.map(r => twilioClient.messages.create({ from: `whatsapp:${fromNumber}`, to: `whatsapp:${r.whatsapp}`, body: contentToSend }));
             await Promise.all(whatsappPromises);
         }
         res.json({ success: true, message: `Communication envoyée via ${channel.toUpperCase()} à ${recipients.length} client(s).` });
