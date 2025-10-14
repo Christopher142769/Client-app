@@ -113,13 +113,48 @@ app.post('/api/auth/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, company.password);
     if (!isMatch) { return res.status(400).json({ message: 'Nom d\'entreprise ou mot de passe invalide.' }); }
     const token = jwt.sign({ id: company._id, name: company.name }, process.env.JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token });
+    res.json({ token, companyName: company.name });
   } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); }
 });
 
 // --- Routes des Clients ---
 app.post('/api/clients', authMiddleware, async (req, res) => { try { const { name, whatsapp, email, status } = req.body; const newClient = new Client({ name, whatsapp, email, status, companyId: req.company.id }); await newClient.save(); res.status(201).json(newClient); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
 app.get('/api/clients', authMiddleware, async (req, res) => { try { const clients = await Client.find({ companyId: req.company.id }); res.json(clients); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
+
+// =================================================================
+// --- NOUVELLES ROUTES POUR L'ÉDITION ET LA SUPPRESSION DE CLIENTS ---
+// =================================================================
+app.put('/api/clients/:id', authMiddleware, async (req, res) => {
+    try {
+        const { name, whatsapp, email, status } = req.body;
+        const updatedClient = await Client.findOneAndUpdate(
+            { _id: req.params.id, companyId: req.company.id },
+            { name, whatsapp, email, status },
+            { new: true } // Renvoie le document mis à jour
+        );
+        if (!updatedClient) {
+            return res.status(404).json({ message: "Client non trouvé ou non autorisé." });
+        }
+        res.json(updatedClient);
+    } catch (error) {
+        res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
+    }
+});
+
+app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
+    try {
+        const deletedClient = await Client.findOneAndDelete({ _id: req.params.id, companyId: req.company.id });
+        if (!deletedClient) {
+            return res.status(404).json({ message: "Client non trouvé ou non autorisé." });
+        }
+        res.json({ message: "Client supprimé avec succès." });
+    } catch (error) {
+        res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
+    }
+});
+// =================================================================
+// --- FIN DES NOUVELLES ROUTES ---
+// =================================================================
 
 // --- Routes des Sondages ---
 app.post('/api/surveys', authMiddleware, async (req, res) => { try { const { title, questions } = req.body; const newSurvey = new Survey({ title, questions, companyId: req.company.id }); await newSurvey.save(); res.status(201).json(newSurvey); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
@@ -190,21 +225,16 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
                 return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
             }
             
-            // !! IMPORTANT !! Remplacez cette URL par la VRAIE URL de votre frontend.
             const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`; 
 
             const whatsappPromises = recipients.map(r => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
                 to: `whatsapp:${r.whatsapp}`,
                 contentSid: 'HX132fe266db19e5cfce7128dc6a2ec4f6',
-                
-                // ================== CORRECTION FINALE APPLIQUÉE ICI ==================
-                // On ne passe QUE les variables 2 et 3, car la 1 est en dur dans le modèle.
                 contentVariables: JSON.stringify({
-                    '2': survey.title, // Variable {{2}} pour le titre du sondage
-                    '3': surveyUrl     // Variable {{3}} pour le lien du sondage
+                    '2': survey.title,
+                    '3': surveyUrl
                 })
-                // ====================================================================
             }));
 
             await Promise.all(whatsappPromises);
