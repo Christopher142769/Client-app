@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate, Navigate, Link, useParams } from 'react-router-dom';
-import { Form, Button, Container, Card, Alert, Navbar, Nav, Modal, ListGroup, Table, Row, Col, Spinner, InputGroup } from 'react-bootstrap';
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { BrowserRouter as Router, Routes, Route, useNavigate, Navigate, Link, NavLink, useLocation, useParams } from 'react-router-dom';
+import { Form, Button, Container, Card, Alert, Navbar, Nav, Modal, ListGroup, Table, Row, Col, Spinner, InputGroup, Dropdown } from 'react-bootstrap';
 import axios from 'axios';
 import { jwtDecode } from 'jwt-decode';
 
@@ -10,7 +10,8 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import {
   FaPlus, FaTrash, FaChartPie, FaUserPlus, FaWpforms, FaPaperPlane,
-  FaCog, FaSignOutAlt, FaEye, FaEnvelope, FaLock, FaBuilding, FaWhatsapp, FaKey, FaSignature, FaQuestionCircle
+  FaCog, FaSignOutAlt, FaEye, FaEnvelope, FaLock, FaBuilding, FaWhatsapp, FaKey, FaSignature, FaQuestionCircle,
+  FaUsers, FaTachometerAlt, FaEdit, FaBars, FaCheckCircle, FaSearch, FaListUl
 } from 'react-icons/fa';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title } from 'chart.js';
 import { Doughnut, Bar } from 'react-chartjs-2';
@@ -26,13 +27,58 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// --- VARIANTES D'ANIMATION (FRAMER MOTION) ---
-const pageVariants = {
-  initial: { opacity: 0, y: 20 },
-  in: { opacity: 1, y: 0 },
-  out: { opacity: 0, y: -20 }
+// --- CONTEXTE D'AUTHENTIFICATION ---
+const AuthContext = createContext(null);
+
+const AuthProvider = ({ children }) => {
+    const [companyName, setCompanyName] = useState(null);
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        const name = localStorage.getItem('companyName');
+        if (name) setCompanyName(name);
+    }, []);
+
+    const login = (token, name) => {
+        localStorage.setItem('token', token);
+        localStorage.setItem('companyName', name);
+        setCompanyName(name);
+        toast.success(`Bienvenue, ${name} !`);
+        navigate('/dashboard');
+    };
+
+    const logout = () => {
+        localStorage.removeItem('token');
+        localStorage.removeItem('companyName');
+        setCompanyName(null);
+        toast.info("Vous avez été déconnecté.");
+        navigate('/login');
+    };
+
+    return (
+        <AuthContext.Provider value={{ companyName, login, logout }}>
+            {children}
+        </AuthContext.Provider>
+    );
 };
 
+const useAuth = () => useContext(AuthContext);
+
+
+// --- VARIANTES D'ANIMATION (FRAMER MOTION) ---
+const pageVariants = {
+  initial: { opacity: 0, x: -50 },
+  in: { opacity: 1, x: 0 },
+  out: { opacity: 0, x: 50 }
+};
+const listVariants = {
+  visible: { transition: { staggerChildren: 0.07, delayChildren: 0.2 } },
+  hidden: {}
+};
+const itemVariants = {
+  visible: { y: 0, opacity: 1, transition: { y: { stiffness: 1000, velocity: -100 } } },
+  hidden: { y: 50, opacity: 0, transition: { y: { stiffness: 1000 } } }
+};
 const cardVariants = {
     offscreen: { y: 50, opacity: 0 },
     onscreen: {
@@ -49,7 +95,12 @@ const cardVariants = {
 
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('token');
-  return token ? children : <Navigate to="/login" />;
+  const location = useLocation();
+
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+  return children;
 };
 
 // --- COMPOSANT : Inscription (Register) ---
@@ -65,7 +116,7 @@ function Register() {
     }
     try {
       await api.post('/auth/register', formData);
-      toast.success('Inscription réussie ! Vous allez être redirigé vers la page de connexion.');
+      toast.success('Inscription réussie ! Vous allez être redirigé.');
       setTimeout(() => navigate('/login'), 3000);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Une erreur est survenue.');
@@ -74,47 +125,40 @@ function Register() {
 
   return (
     <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
-      <Container className="d-flex align-items-center justify-content-center" style={{ minHeight: "100vh", padding: "40px 0"}}>
-        <Card className="shadow-lg border-0" style={{ width: '650px', backdropFilter: 'blur(10px)', backgroundColor: 'rgba(255, 255, 255, 0.8)' }}>
-          <Card.Body className="p-5">
-            <div className="text-center mb-4">
-                <FaBuilding size={40} className="text-primary mb-2" />
-                <h2>Créer un Compte Entreprise</h2>
-                <p className="text-muted">Rejoignez-nous et commencez à communiquer efficacement.</p>
-            </div>
-            <Form onSubmit={handleSubmit}>
-              {/* Infos principales */}
-              <Row>
-                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaBuilding /></InputGroup.Text><Form.Control type="text" name="name" placeholder="Nom de l'entreprise" onChange={handleChange} required /></InputGroup></Col>
-                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaEnvelope /></InputGroup.Text><Form.Control type="email" name="email" placeholder="Email de connexion" onChange={handleChange} required /></InputGroup></Col>
-              </Row>
-              <Row>
-                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaLock /></InputGroup.Text><Form.Control type="password" name="password" placeholder="Mot de passe" onChange={handleChange} required /></InputGroup></Col>
-                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaLock /></InputGroup.Text><Form.Control type="password" name="passwordConfirm" placeholder="Confirmer le mot de passe" onChange={handleChange} required /></InputGroup></Col>
-              </Row>
-              <hr className="my-4"/>
-              {/* Configuration optionnelle */}
-              <div className="text-center">
-                  <h5 className="text-muted">Configuration des Envois (Optionnel)</h5>
-                  <p className="text-muted small">Renseignez ces clés pour activer l'envoi d'emails et de messages WhatsApp.</p>
-              </div>
-              <InputGroup className="mb-3"><InputGroup.Text><FaKey /></InputGroup.Text><Form.Control type="password" name="emailAppPassword" placeholder="Mot de Passe d'Application Gmail" onChange={handleChange} /></InputGroup>
-              <Row>
-                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaSignature /></InputGroup.Text><Form.Control type="text" name="twilioSid" placeholder="Twilio Account SID" onChange={handleChange} /></InputGroup></Col>
-                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaKey /></InputGroup.Text><Form.Control type="password" name="twilioToken" placeholder="Twilio Auth Token" onChange={handleChange} /></InputGroup></Col>
-              </Row>
-              <Row>
-                   <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaWhatsapp /></InputGroup.Text><Form.Control type="text" name="twilioWhatsappNumber" placeholder="Votre N° WhatsApp Twilio" onChange={handleChange} /></InputGroup></Col>
-                   <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaWhatsapp /></InputGroup.Text><Form.Control type="text" name="whatsapp" placeholder="Votre N° WhatsApp (Contact)" onChange={handleChange} required/></InputGroup></Col>
-              </Row>
-              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Button className="w-100 mt-3" type="submit" variant="primary" size="lg">Créer le compte</Button>
-              </motion.div>
-              <div className="text-center mt-4">Déjà un compte ? <Link to="/login">Connectez-vous</Link></div>
-            </Form>
-          </Card.Body>
-        </Card>
-      </Container>
+      <Card className="shadow-lg border-0" style={{ width: '650px', backdropFilter: 'blur(10px)', backgroundColor: 'rgba(255, 255, 255, 0.8)' }}>
+        <Card.Body className="p-5">
+          <div className="text-center mb-4">
+              <FaBuilding size={40} className="text-primary mb-2" />
+              <h2>Créer un Compte Entreprise</h2>
+              <p className="text-muted">Rejoignez-nous pour une communication efficace.</p>
+          </div>
+          <Form onSubmit={handleSubmit}>
+            <Row>
+                <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaBuilding /></InputGroup.Text><Form.Control type="text" name="name" placeholder="Nom de l'entreprise" onChange={handleChange} required /></InputGroup></Col>
+                <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaEnvelope /></InputGroup.Text><Form.Control type="email" name="email" placeholder="Email de connexion" onChange={handleChange} required /></InputGroup></Col>
+            </Row>
+            <Row>
+                <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaLock /></InputGroup.Text><Form.Control type="password" name="password" placeholder="Mot de passe" onChange={handleChange} required /></InputGroup></Col>
+                <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaLock /></InputGroup.Text><Form.Control type="password" name="passwordConfirm" placeholder="Confirmer le mot de passe" onChange={handleChange} required /></InputGroup></Col>
+            </Row>
+            <hr className="my-4"/>
+            <div className="text-center"><h5 className="text-muted">Configuration des Envois (Optionnel)</h5></div>
+            <InputGroup className="mb-3"><InputGroup.Text><FaKey /></InputGroup.Text><Form.Control type="password" name="emailAppPassword" placeholder="Mot de Passe d'Application Gmail" onChange={handleChange} /></InputGroup>
+            <Row>
+                <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaSignature /></InputGroup.Text><Form.Control type="text" name="twilioSid" placeholder="Twilio Account SID" onChange={handleChange} /></InputGroup></Col>
+                <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaKey /></InputGroup.Text><Form.Control type="password" name="twilioToken" placeholder="Twilio Auth Token" onChange={handleChange} /></InputGroup></Col>
+            </Row>
+            <Row>
+                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaWhatsapp /></InputGroup.Text><Form.Control type="text" name="twilioWhatsappNumber" placeholder="Votre N° WhatsApp Twilio" onChange={handleChange} /></InputGroup></Col>
+                  <Col md={6}><InputGroup className="mb-3"><InputGroup.Text><FaWhatsapp /></InputGroup.Text><Form.Control type="text" name="whatsapp" placeholder="Votre N° WhatsApp (Contact)" onChange={handleChange} required/></InputGroup></Col>
+            </Row>
+            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+              <Button className="w-100 mt-3" type="submit" variant="primary" size="lg">Créer le compte</Button>
+            </motion.div>
+            <div className="text-center mt-4">Déjà un compte ? <Link to="/login">Connectez-vous</Link></div>
+          </Form>
+        </Card.Body>
+      </Card>
     </motion.div>
   );
 }
@@ -122,64 +166,117 @@ function Register() {
 // --- COMPOSANT : Connexion (Login) ---
 function Login() {
   const [formData, setFormData] = useState({ name: '', password: '' });
-  const navigate = useNavigate();
+  const { login } = useAuth();
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       const { data } = await api.post('/auth/login', formData);
-      localStorage.setItem('token', data.token);
-      toast.success(`Bienvenue, ${formData.name} !`);
-      navigate('/dashboard');
+      login(data.token, data.companyName);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Identifiants incorrects.');
     }
   };
   return (
     <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
-        <Container className="d-flex align-items-center justify-content-center vh-100">
-          <Card className="shadow-lg border-0" style={{ width: '450px', backdropFilter: 'blur(10px)', backgroundColor: 'rgba(255, 255, 255, 0.8)' }}>
-            <Card.Body className="p-5">
-              <div className="text-center mb-4">
-                  <FaBuilding size={40} className="text-primary mb-2" />
-                  <h2>Connexion</h2>
-                  <p className="text-muted">Heureux de vous revoir.</p>
-              </div>
-              <Form onSubmit={handleSubmit}>
-                <Form.Group className="mb-3">
-                    <Form.Label>Nom de l'entreprise</Form.Label>
-                    <InputGroup><InputGroup.Text><FaBuilding /></InputGroup.Text><Form.Control type="text" name="name" onChange={handleChange} required /></InputGroup>
-                </Form.Group>
-                <Form.Group className="mb-3">
-                    <Form.Label>Mot de passe</Form.Label>
-                    <InputGroup><InputGroup.Text><FaLock /></InputGroup.Text><Form.Control type="password" name="password" onChange={handleChange} required /></InputGroup>
-                </Form.Group>
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                    <Button className="w-100" type="submit" size="lg">Se Connecter</Button>
-                </motion.div>
-                <div className="text-center mt-4">Pas de compte ? <Link to="/register">Inscrivez-vous</Link></div>
-              </Form>
-          </Card.Body></Card>
-        </Container>
+      <Card className="shadow-lg border-0" style={{ width: '450px', backdropFilter: 'blur(10px)', backgroundColor: 'rgba(255, 255, 255, 0.8)' }}>
+        <Card.Body className="p-5">
+          <div className="text-center mb-4">
+              <FaBuilding size={40} className="text-primary mb-2" />
+              <h2>Connexion</h2>
+              <p className="text-muted">Heureux de vous revoir.</p>
+          </div>
+          <Form onSubmit={handleSubmit}>
+            <Form.Group className="mb-3">
+                <Form.Label>Nom de l'entreprise</Form.Label>
+                <InputGroup><InputGroup.Text><FaBuilding /></InputGroup.Text><Form.Control type="text" name="name" onChange={handleChange} required /></InputGroup>
+            </Form.Group>
+            <Form.Group className="mb-3">
+                <Form.Label>Mot de passe</Form.Label>
+                <InputGroup><InputGroup.Text><FaLock /></InputGroup.Text><Form.Control type="password" name="password" onChange={handleChange} required /></InputGroup>
+            </Form.Group>
+            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Button className="w-100" type="submit" size="lg">Se Connecter</Button>
+            </motion.div>
+            <div className="text-center mt-4">Pas de compte ? <Link to="/register">Inscrivez-vous</Link></div>
+          </Form>
+      </Card.Body></Card>
     </motion.div>
   );
 }
 
-// --- COMPOSANT : Modale d'ajout de client ---
-function AddClientModal({ show, handleClose, onClientAdded }) {
+
+// =================================================================
+// --- MODALES DE L'APPLICATION ---
+// =================================================================
+
+
+// --- COMPOSANT : Modale de confirmation ---
+function ConfirmationModal({ show, handleClose, onConfirm, title, body }) {
+    return (
+        <Modal show={show} onHide={handleClose} centered>
+            <Modal.Header closeButton>
+                <Modal.Title>{title}</Modal.Title>
+            </Modal.Header>
+            <Modal.Body>{body}</Modal.Body>
+            <Modal.Footer>
+                <Button variant="secondary" onClick={handleClose}>Annuler</Button>
+                <Button variant="danger" onClick={onConfirm}>Confirmer</Button>
+            </Modal.Footer>
+        </Modal>
+    );
+}
+
+// --- COMPOSANT : Modale d'ajout/édition de client ---
+function ClientModal({ show, handleClose, onClientSaved, clientToEdit }) {
     const [formData, setFormData] = useState({ name: '', whatsapp: '', email: '', status: 'Non Vérifié' });
+
+    useEffect(() => {
+        if (clientToEdit) {
+            setFormData(clientToEdit);
+        } else {
+            setFormData({ name: '', whatsapp: '', email: '', status: 'Non Vérifié' });
+        }
+    }, [clientToEdit, show]);
+
     const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            const { data } = await api.post('/clients', formData);
-            toast.success(`Client ${data.name} ajouté !`);
-            onClientAdded(data);
+            let response;
+            if (clientToEdit) {
+                response = await api.put(`/clients/${clientToEdit._id}`, formData);
+                toast.success(`Client ${response.data.name} mis à jour !`);
+            } else {
+                response = await api.post('/clients', formData);
+                toast.success(`Client ${response.data.name} ajouté !`);
+            }
+            onClientSaved(response.data);
             handleClose();
-        } catch (error) { toast.error("Erreur lors de l'ajout du client."); console.error("Erreur ajout client", error); }
+        } catch (error) { toast.error("Erreur lors de l'enregistrement du client."); }
     };
-    return (<Modal show={show} onHide={handleClose} centered><Modal.Header closeButton><Modal.Title><FaUserPlus className="me-2"/>Ajouter un Nouveau Client</Modal.Title></Modal.Header><Modal.Body><Form onSubmit={handleSubmit}><Form.Group className="mb-3"><Form.Label>Nom</Form.Label><Form.Control type="text" name="name" onChange={handleChange} required /></Form.Group><Form.Group className="mb-3"><Form.Label>Email</Form.Label><Form.Control type="email" name="email" onChange={handleChange} required /></Form.Group><Form.Group className="mb-3"><Form.Label>WhatsApp</Form.Label><Form.Control type="text" name="whatsapp" placeholder="+22912345678" onChange={handleChange} required /></Form.Group><Form.Group className="mb-3"><Form.Label>Statut</Form.Label><Form.Select name="status" onChange={handleChange}><option>Non Vérifié</option><option>Vérifié</option></Form.Select></Form.Group><Button variant="primary" type="submit" className="w-100">Ajouter le client</Button></Form></Modal.Body></Modal>);
+
+    return (
+        <Modal show={show} onHide={handleClose} centered>
+            <Modal.Header closeButton>
+                <Modal.Title>
+                    {clientToEdit ? <><FaEdit className="me-2"/>Modifier le Client</> : <><FaUserPlus className="me-2"/>Ajouter un Nouveau Client</>}
+                </Modal.Title>
+            </Modal.Header>
+            <Modal.Body>
+                <Form onSubmit={handleSubmit}>
+                    <Form.Group className="mb-3"><Form.Label>Nom</Form.Label><Form.Control type="text" name="name" value={formData.name} onChange={handleChange} required /></Form.Group>
+                    <Form.Group className="mb-3"><Form.Label>Email</Form.Label><Form.Control type="email" name="email" value={formData.email} onChange={handleChange} required /></Form.Group>
+                    <Form.Group className="mb-3"><Form.Label>WhatsApp</Form.Label><Form.Control type="text" name="whatsapp" value={formData.whatsapp} placeholder="+22912345678" onChange={handleChange} required /></Form.Group>
+                    <Form.Group className="mb-3"><Form.Label>Statut</Form.Label><Form.Select name="status" value={formData.status} onChange={handleChange}><option>Non Vérifié</option><option>Vérifié</option></Form.Select></Form.Group>
+                    <Button variant="primary" type="submit" className="w-100">{clientToEdit ? 'Mettre à jour' : 'Ajouter le client'}</Button>
+                </Form>
+            </Modal.Body>
+        </Modal>
+    );
 }
+
 
 // --- COMPOSANT : Modale de création de sondage ---
 function CreateSurveyModal({ show, handleClose, onSurveyCreated }) {
@@ -264,42 +361,140 @@ function CreateSurveyModal({ show, handleClose, onSurveyCreated }) {
     );
 }
 
-// --- COMPOSANT : Modale d'envoi de communication ---
+// --- NOUVEAU --- COMPOSANT : Modale d'envoi de communication améliorée ---
 function SendCommunicationModal({ show, handleClose, clients, surveys }) {
-    const [contentType, setContentType] = useState('message'); const [message, setMessage] = useState(''); const [surveyId, setSurveyId] = useState(''); const [channel, setChannel] = useState('whatsapp'); const [recipientType, setRecipientType] = useState('all'); const [status, setStatus] = useState('Vérifié'); const [selectedClients, setSelectedClients] = useState([]);
-    useEffect(() => { if(surveys.length > 0) setSurveyId(surveys[0]._id); }, [surveys]);
-    const handleSelectClient = (clientId) => { setSelectedClients(prev => prev.includes(clientId) ? prev.filter(id => id !== clientId) : [...prev, clientId]); };
+    const [channel, setChannel] = useState('email');
+    const [contentType, setContentType] = useState('survey');
+    const [message, setMessage] = useState('');
+    const [surveyId, setSurveyId] = useState('');
+    const [recipientType, setRecipientType] = useState('all');
+    const [status, setStatus] = useState('Vérifié');
+    const [selectedClients, setSelectedClients] = useState([]);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    useEffect(() => {
+        if (surveys.length > 0) {
+            setSurveyId(surveys[0]._id);
+        }
+    }, [surveys, show]);
+
+    const handleSelectClient = (clientId) => {
+        setSelectedClients(prev => prev.includes(clientId) ? prev.filter(id => id !== clientId) : [...prev, clientId]);
+    };
+    
     const handleSubmit = async (e) => {
         e.preventDefault();
         const payload = { channel, recipientType };
-        if (contentType === 'message') payload.message = message;
-        if (contentType === 'survey') payload.surveyId = surveyId;
+        if (contentType === 'message') {
+            if (!message) return toast.warn("Le message ne peut pas être vide.");
+            payload.message = message;
+        }
+        if (contentType === 'survey') {
+            if (!surveyId) return toast.warn("Veuillez sélectionner un sondage.");
+            payload.surveyId = surveyId;
+        }
         if (recipientType === 'status') payload.status = status;
-        if (recipientType === 'selection') payload.clientIds = selectedClients;
+        if (recipientType === 'selection') {
+            if (selectedClients.length === 0) return toast.warn("Veuillez sélectionner au moins un client.");
+            payload.clientIds = selectedClients;
+        }
         try {
             const { data } = await api.post('/communications/send', payload);
-            toast.info(data.message); handleClose();
-        } catch (error) { toast.error(error.response?.data?.message || "Échec de l'envoi"); }
+            toast.info(data.message);
+            handleClose();
+        } catch (error) {
+            toast.error(error.response?.data?.message || "Échec de l'envoi");
+        }
     };
+
+    const filteredClients = clients.filter(client => 
+        client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        client.email.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
     return (
-    <Modal show={show} onHide={handleClose} size="lg" centered>
-        <Modal.Header closeButton><Modal.Title><FaPaperPlane className="me-2"/>Envoyer une Communication</Modal.Title></Modal.Header>
-        <Modal.Body>
-            <Form onSubmit={handleSubmit}>
-                <Row>
-                    <Col md={6}><Form.Group className="mb-3"><Form.Label>Type de Contenu</Form.Label><Form.Select onChange={e => setContentType(e.target.value)}><option value="message">Message Simple</option><option value="survey">Sondage</option></Form.Select></Form.Group></Col>
-                    <Col md={6}><Form.Group className="mb-3"><Form.Label>Canal d'envoi</Form.Label><Form.Select onChange={e => setChannel(e.target.value)}><option value="whatsapp">WhatsApp</option><option value="email">Email</option></Form.Select></Form.Group></Col>
-                </Row>
-                {contentType === 'message' ? (<Form.Group className="mb-3"><Form.Label>Votre Message</Form.Label><Form.Control as="textarea" rows={4} value={message} onChange={e => setMessage(e.target.value)} required /></Form.Group>) : (<Form.Group className="mb-3"><Form.Label>Choisir le Sondage</Form.Label><Form.Select onChange={e => setSurveyId(e.target.value)} value={surveyId}>{surveys.map(s => <option key={s._id} value={s._id}>{s.title}</option>)}</Form.Select></Form.Group>)}
-                <hr/>
-                <Form.Group className="mb-3"><Form.Label>Destinataires</Form.Label><Form.Select onChange={e => setRecipientType(e.target.value)}><option value="all">Tous les clients</option><option value="status">Par Statut</option><option value="selection">Sélectionner manuellement</option></Form.Select></Form.Group>
-                {recipientType === 'status' && (<Form.Group className="mb-3"><Form.Label>Choisir le statut</Form.Label><Form.Select onChange={e => setStatus(e.target.value)}><option>Vérifié</option><option>Non Vérifié</option></Form.Select></Form.Group>)}
-                {recipientType === 'selection' && (<Form.Group className="mb-3" style={{maxHeight: '200px', overflowY: 'auto', border:'1px solid #dee2e6', borderRadius: '.25rem', padding: '10px'}}><Form.Label>Sélectionner les clients</Form.Label>{clients.map(client => ( <Form.Check type="checkbox" key={client._id} label={`${client.name} (${channel === 'email' ? client.email : client.whatsapp})`} onChange={() => handleSelectClient(client._id)} /> ))}</Form.Group>)}
-                <Button variant="primary" type="submit" className="w-100">Envoyer</Button>
-            </Form>
-        </Modal.Body>
-    </Modal>);
+        <Modal show={show} onHide={handleClose} size="lg" centered>
+            <Modal.Header closeButton>
+                <Modal.Title><FaPaperPlane className="me-2" />Envoyer une Communication</Modal.Title>
+            </Modal.Header>
+            <Modal.Body className="p-4">
+                <Form onSubmit={handleSubmit}>
+                    {/* Étape 1: Canal */}
+                    <Card className="mb-4">
+                        <Card.Header as="h5">Étape 1: Choisir le canal</Card.Header>
+                        <Card.Body>
+                            <Row>
+                                <Col>
+                                    <Card 
+                                        className={`text-center p-3 h-100 card-lift channel-card ${channel === 'email' ? 'selected' : ''}`}
+                                        onClick={() => setChannel('email')}>
+                                        <FaEnvelope size={30} className="mx-auto mb-2 text-primary"/>
+                                        <h4>Email</h4>
+                                        {channel === 'email' && <FaCheckCircle className="text-success checkmark-icon"/>}
+                                    </Card>
+                                </Col>
+                                <Col>
+                                    <Card 
+                                        className={`text-center p-3 h-100 card-lift channel-card ${channel === 'whatsapp' ? 'selected' : ''}`}
+                                        onClick={() => setChannel('whatsapp')}>
+                                        <FaWhatsapp size={30} className="mx-auto mb-2 text-success"/>
+                                        <h4>WhatsApp</h4>
+                                        {channel === 'whatsapp' && <FaCheckCircle className="text-success checkmark-icon"/>}
+                                    </Card>
+                                </Col>
+                            </Row>
+                        </Card.Body>
+                    </Card>
+
+                    {/* Étape 2: Contenu */}
+                    <Card className="mb-4">
+                        <Card.Header as="h5">Étape 2: Définir le contenu</Card.Header>
+                        <Card.Body>
+                             <Form.Group className="mb-3"><Form.Label>Type de Contenu</Form.Label><Form.Select value={contentType} onChange={e => setContentType(e.target.value)}><option value="survey">Sondage</option><option value="message">Message Simple</option></Form.Select></Form.Group>
+                             {contentType === 'message' ? (<Form.Group><Form.Label>Votre Message</Form.Label><Form.Control as="textarea" rows={4} value={message} onChange={e => setMessage(e.target.value)} required /></Form.Group>) : (<Form.Group><Form.Label>Choisir le Sondage</Form.Label><Form.Select onChange={e => setSurveyId(e.target.value)} value={surveyId}>{surveys.map(s => <option key={s._id} value={s._id}>{s.title}</option>)}</Form.Select></Form.Group>)}
+                        </Card.Body>
+                    </Card>
+
+                    {/* Étape 3: Destinataires */}
+                    <Card className="mb-4">
+                        <Card.Header as="h5">Étape 3: Choisir les destinataires</Card.Header>
+                        <Card.Body>
+                             <Form.Group className="mb-3"><Form.Label>Envoyer à</Form.Label><Form.Select value={recipientType} onChange={e => setRecipientType(e.target.value)}><option value="all">Tous les clients</option><option value="status">Par Statut</option><option value="selection">Sélectionner manuellement</option></Form.Select></Form.Group>
+                             {recipientType === 'status' && (<Form.Group className="mb-3"><Form.Label>Statut du client</Form.Label><Form.Select value={status} onChange={e => setStatus(e.target.value)}><option>Vérifié</option><option>Non Vérifié</option></Form.Select></Form.Group>)}
+                             {recipientType === 'selection' && (
+                                <>
+                                    <InputGroup className="mb-3">
+                                        <InputGroup.Text><FaSearch /></InputGroup.Text>
+                                        <Form.Control placeholder="Rechercher un client..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                    </InputGroup>
+                                    <ListGroup style={{maxHeight: '200px', overflowY: 'auto'}}>
+                                        {filteredClients.length > 0 ? filteredClients.map(client => (
+                                            <ListGroup.Item key={client._id}>
+                                                <Form.Check 
+                                                    type="checkbox"
+                                                    label={`${client.name} (${channel === 'email' ? client.email : client.whatsapp})`}
+                                                    checked={selectedClients.includes(client._id)}
+                                                    onChange={() => handleSelectClient(client._id)}
+                                                />
+                                            </ListGroup.Item>
+                                        )) : <p className="text-muted text-center p-3">Aucun client trouvé.</p>}
+                                    </ListGroup>
+                                </>
+                             )}
+                        </Card.Body>
+                    </Card>
+                    <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                      <Button variant="primary" type="submit" className="w-100" size="lg">
+                          <FaPaperPlane className="me-2" />
+                          Envoyer la communication
+                      </Button>
+                    </motion.div>
+                </Form>
+            </Modal.Body>
+        </Modal>
+    );
 }
+
 
 // --- COMPOSANT : Modale des résultats de sondage ---
 function SurveyResultsModal({ show, handleClose, surveyId }) {
@@ -352,6 +547,247 @@ function SurveyResultsModal({ show, handleClose, surveyId }) {
     </Modal>)
 }
 
+// =================================================================
+// --- PAGES DE L'APPLICATION ---
+// =================================================================
+
+
+// --- Page: Gestion des clients ---
+function Clients() {
+    const [clients, setClients] = useState([]);
+    const [surveys, setSurveys] = useState([]); // AJOUT: pour passer aux modales
+    const [loading, setLoading] = useState(true);
+    const [showClientModal, setShowClientModal] = useState(false);
+    const [showCommModal, setShowCommModal] = useState(false); // AJOUT: état pour la modale de comm
+    const [clientToEdit, setClientToEdit] = useState(null);
+    const [clientToDelete, setClientToDelete] = useState(null);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                // On charge les clients ET les sondages pour la modale de communication
+                const [clientsRes, surveysRes] = await Promise.all([
+                    api.get('/clients'),
+                    api.get('/surveys')
+                ]);
+                setClients(clientsRes.data);
+                setSurveys(surveysRes.data);
+            } catch (error) {
+                toast.error("Erreur de chargement des données.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchData();
+    }, []);
+
+    const handleClientSaved = (savedClient) => {
+        if (clientToEdit) {
+            setClients(clients.map(c => c._id === savedClient._id ? savedClient : c));
+        } else {
+            setClients([...clients, savedClient]);
+        }
+        setClientToEdit(null);
+    };
+
+    const handleEditClick = (client) => {
+        setClientToEdit(client);
+        setShowClientModal(true);
+    };
+
+    const handleDeleteClick = (client) => {
+        setClientToDelete(client);
+        setShowDeleteModal(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!clientToDelete) return;
+        try {
+            await api.delete(`/clients/${clientToDelete._id}`);
+            setClients(clients.filter(c => c._id !== clientToDelete._id));
+            toast.success(`Client ${clientToDelete.name} supprimé.`);
+            setShowDeleteModal(false);
+            setClientToDelete(null);
+        } catch (error) {
+            toast.error("Erreur lors de la suppression.");
+        }
+    };
+    
+    return (
+        <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
+            <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                <h1><FaUsers className="me-2" /> Gestion des Clients</h1>
+                <div className="d-flex gap-2">
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                        <Button variant="info" className="text-white" onClick={() => setShowCommModal(true)}>
+                            <FaPaperPlane className="me-2" /> Envoyer une Communication
+                        </Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                        <Button variant="primary" onClick={() => { setClientToEdit(null); setShowClientModal(true); }}>
+                            <FaUserPlus className="me-2" /> Ajouter un Client
+                        </Button>
+                    </motion.div>
+                </div>
+            </div>
+            <motion.div variants={itemVariants}>
+                <Card className="shadow-sm">
+                    <Card.Body>
+                        <Table responsive hover className="align-middle">
+                            <thead className="table-light">
+                                <tr><th>Nom</th><th>Email</th><th>WhatsApp</th><th>Statut</th><th className="text-center">Actions</th></tr>
+                            </thead>
+                            <motion.tbody initial="hidden" animate="visible" variants={listVariants}>
+                                {loading ? (<tr><td colSpan="5" className="text-center p-5"><Spinner animation="border" /></td></tr>)
+                                 : clients.length > 0 ? clients.map(client => (
+                                    <motion.tr key={client._id} variants={itemVariants}>
+                                        <td>{client.name}</td>
+                                        <td>{client.email}</td>
+                                        <td>{client.whatsapp}</td>
+                                        <td><span className={`badge bg-${client.status === 'Vérifié' ? 'success' : 'warning'}`}>{client.status}</span></td>
+                                        <td className="text-center">
+                                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="btn btn-sm btn-outline-primary me-2" onClick={() => handleEditClick(client)}><FaEdit /></motion.button>
+                                            <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteClick(client)}><FaTrash /></motion.button>
+                                        </td>
+                                    </motion.tr>
+                                )) : (<tr><td colSpan="5" className="text-center p-4 text-muted">Aucun client.</td></tr>)}
+                            </motion.tbody>
+                        </Table>
+                    </Card.Body>
+                </Card>
+            </motion.div>
+            
+            <ClientModal 
+                show={showClientModal} 
+                handleClose={() => setShowClientModal(false)} 
+                onClientSaved={handleClientSaved}
+                clientToEdit={clientToEdit}
+            />
+            {clientToDelete && <ConfirmationModal 
+                show={showDeleteModal} 
+                handleClose={() => setShowDeleteModal(false)} 
+                onConfirm={confirmDelete}
+                title="Confirmer la Suppression"
+                body={`Êtes-vous sûr de vouloir supprimer le client "${clientToDelete.name}" ? Cette action est irréversible.`}
+            />}
+            <SendCommunicationModal
+                show={showCommModal}
+                handleClose={() => setShowCommModal(false)}
+                clients={clients}
+                surveys={surveys}
+            />
+        </motion.div>
+    )
+}
+
+// --- Page: Gestion des Sondages ---
+function SurveysPage() {
+    const [surveys, setSurveys] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [showSurveyModal, setShowSurveyModal] = useState(false);
+    const [showResultsModal, setShowResultsModal] = useState(false);
+    const [selectedSurveyId, setSelectedSurveyId] = useState(null);
+
+    useEffect(() => {
+        api.get('/surveys')
+            .then(res => setSurveys(res.data))
+            .catch(() => toast.error("Erreur de chargement des sondages."))
+            .finally(() => setLoading(false));
+    }, []);
+
+    const viewSurveyResults = (surveyId) => {
+        setSelectedSurveyId(surveyId);
+        setShowResultsModal(true);
+    };
+
+    return (
+        <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
+            <div className="d-flex justify-content-between align-items-center mb-4">
+                <h1><FaWpforms className="me-2" /> Gestion des Sondages</h1>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                    <Button variant="success" onClick={() => setShowSurveyModal(true)}>
+                        <FaPlus className="me-2" /> Créer un Sondage
+                    </Button>
+                </motion.div>
+            </div>
+             <motion.div variants={itemVariants}>
+                <Card className="shadow-sm">
+                    <Card.Body>
+                        <Table responsive hover className="align-middle">
+                            <thead className="table-light">
+                                <tr><th>Titre</th><th className="text-center">Questions</th><th className="text-center">Actions</th></tr>
+                            </thead>
+                             <motion.tbody initial="hidden" animate="visible" variants={listVariants}>
+                                {loading ? (<tr><td colSpan="3" className="text-center p-5"><Spinner animation="border" /></td></tr>)
+                                 : surveys.length > 0 ? surveys.map(survey => (
+                                    <motion.tr key={survey._id} variants={itemVariants}>
+                                        <td>{survey.title}</td>
+                                        <td className="text-center">{survey.questions.length}</td>
+                                        <td className="text-center">
+                                            <Button variant="outline-primary" size="sm" onClick={() => viewSurveyResults(survey._id)}>
+                                                <FaEye className="me-1"/>Voir Résultats
+                                            </Button>
+                                        </td>
+                                    </motion.tr>
+                                )) : (<tr><td colSpan="3" className="text-center p-4 text-muted">Aucun sondage créé.</td></tr>)}
+                            </motion.tbody>
+                        </Table>
+                    </Card.Body>
+                </Card>
+            </motion.div>
+            <CreateSurveyModal show={showSurveyModal} handleClose={() => setShowSurveyModal(false)} onSurveyCreated={(newSurvey) => setSurveys(prev => [...prev, newSurvey])} />
+            {showResultsModal && <SurveyResultsModal show={showResultsModal} handleClose={() => setShowResultsModal(false)} surveyId={selectedSurveyId} />}
+        </motion.div>
+    )
+}
+
+// --- COMPOSANT : Tableau de bord (Dashboard) ---
+function Dashboard() {
+  const [stats, setStats] = useState({ clients: 0, surveys: 0 });
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    const fetchData = async () => {
+        try {
+            const [clientsRes, surveysRes] = await Promise.all([api.get('/clients'), api.get('/surveys')]);
+            setStats({ clients: clientsRes.data.length, surveys: surveysRes.data.length });
+        } catch (error) { toast.error("Erreur de chargement des données."); }
+        finally { setLoading(false); }
+    };
+    fetchData();
+  }, []);
+
+  if (loading) {
+      return <div className="d-flex justify-content-center align-items-center" style={{ height: '80vh' }}><Spinner animation="border" variant="primary" /></div>;
+  }
+
+  return (
+    <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
+        <h1 className="mb-4"><FaTachometerAlt className="me-2" /> Tableau de Bord</h1>
+        <motion.div initial="hidden" animate="visible" variants={listVariants}>
+            <Row>
+                {[ {title: "Clients", value: stats.clients, icon: FaUsers, link: "/clients"}, {title: "Sondages Créés", value: stats.surveys, icon: FaWpforms, link: "/surveys"} ].map((item, i) => (
+                    <Col md={6} key={i} className="mb-4">
+                        <motion.div variants={itemVariants}>
+                            <Link to={item.link} className="text-decoration-none">
+                                <Card className="text-center shadow-sm border-0 h-100 card-lift">
+                                    <Card.Body className="d-flex flex-column justify-content-center p-4">
+                                        <motion.div whileHover={{ scale: 1.2, rotate: 5 }}><item.icon size={40} className="text-primary mb-3 mx-auto"/></motion.div>
+                                        <Card.Title className="h3">{item.title}</Card.Title>
+                                        <Card.Text className="fs-1 fw-bold text-primary">{item.value}</Card.Text>
+                                    </Card.Body>
+                                </Card>
+                            </Link>
+                        </motion.div>
+                    </Col>
+                ))}
+            </Row>
+        </motion.div>
+    </motion.div>
+  );
+}
+
 // --- COMPOSANT : Page des paramètres ---
 function Settings() {
     const [formData, setFormData] = useState({ emailAppPassword: '', twilioSid: '', twilioToken: '', twilioWhatsappNumber: '' });
@@ -368,105 +804,35 @@ function Settings() {
     };
 
     return (
-        <>
-            <AppNavbar />
-            <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
-            <Container className="mt-5"><Row className="justify-content-center"><Col md={8}>
-            <Card className="shadow-lg border-0">
-                <Card.Body className="p-5">
-                    <div className="text-center mb-4">
-                        <FaCog size={40} className="text-primary mb-2"/>
-                        <h2>Paramètres d'Envoi</h2>
-                        <p className="text-muted">Mettez à jour vos clés d'API ici. Vos informations actuelles sont chiffrées et ne sont jamais affichées.</p>
-                    </div>
-                    <Form onSubmit={handleSubmit}>
-                        <Form.Group className="mb-3"><Form.Label>Nouveau Mot de Passe d'Application Gmail</Form.Label><Form.Control type="password" name="emailAppPassword" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group>
-                        <Row>
-                            <Col md={6}><Form.Group className="mb-3"><Form.Label>Nouveau Twilio Account SID</Form.Label><Form.Control type="text" name="twilioSid" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group></Col>
-                            <Col md={6}><Form.Group className="mb-3"><Form.Label>Nouveau Twilio Auth Token</Form.Label><Form.Control type="password" name="twilioToken" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group></Col>
-                        </Row>
-                        <Form.Group className="mb-3"><Form.Label>Nouveau Numéro WhatsApp Twilio</Form.Label><Form.Control type="text" name="twilioWhatsappNumber" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group>
-                        <Button type="submit" variant="primary" className="w-100">Mettre à jour les Paramètres</Button>
-                    </Form>
-                </Card.Body>
-            </Card>
-            </Col></Row></Container>
-            </motion.div>
-        </>
-    );
-}
-
-// --- COMPOSANT : Tableau de bord (Dashboard) ---
-function Dashboard() {
-  const [clients, setClients] = useState([]); const [surveys, setSurveys] = useState([]);
-  const [showClientModal, setShowClientModal] = useState(false); const [showSurveyModal, setShowSurveyModal] = useState(false); const [showCommunicationModal, setShowCommunicationModal] = useState(false); const [showResultsModal, setShowResultsModal] = useState(false); const [selectedSurveyId, setSelectedSurveyId] = useState(null);
-  
-  useEffect(() => {
-    const fetchData = async () => {
-        try {
-            const [clientsRes, surveysRes] = await Promise.all([api.get('/clients'), api.get('/surveys')]);
-            setClients(clientsRes.data); setSurveys(surveysRes.data);
-        } catch (error) { toast.error("Erreur de chargement des données."); }
-    };
-    fetchData();
-  }, []);
-
-  const viewSurveyResults = (surveyId) => { setSelectedSurveyId(surveyId); setShowResultsModal(true); };
-
-  return (
-    <>
-      <AppNavbar />
-      <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
-      <Container fluid className="p-4">
-        {/* Cartes de statistiques */}
-        <Row className="mb-4">
-            {[ {title: "Clients", value: clients.length, icon: FaUserPlus}, {title: "Sondages Créés", value: surveys.length, icon: FaWpforms} ].map((item, i) => (
-                <Col md={6} key={i}>
-                    <motion.div variants={cardVariants} initial="offscreen" whileInView="onscreen" viewport={{ once: true, amount: 0.5 }}>
-                        <Card className="text-center shadow-sm border-0 h-100">
-                            <Card.Body className="d-flex flex-column justify-content-center">
-                                <item.icon size={30} className="text-primary mb-2 mx-auto"/>
-                                <Card.Title>{item.title}</Card.Title>
-                                <Card.Text className="fs-1 fw-bold text-primary">{item.value}</Card.Text>
+        <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
+            <h1 className="mb-4"><FaCog className="me-2" /> Paramètres</h1>
+            <Row className="justify-content-center">
+                <Col md={10} lg={8}>
+                    <motion.div variants={itemVariants}>
+                        <Card className="shadow-sm">
+                            <Card.Body className="p-4 p-md-5">
+                                <div className="text-center mb-4">
+                                    <h2>Paramètres d'Envoi</h2>
+                                    <p className="text-muted">Mettez à jour vos clés d'API ici. Vos informations actuelles sont chiffrées et ne sont jamais affichées.</p>
+                                </div>
+                                <Form onSubmit={handleSubmit}>
+                                    <Form.Group className="mb-3"><Form.Label>Nouveau Mot de Passe d'Application Gmail</Form.Label><Form.Control type="password" name="emailAppPassword" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group>
+                                    <Row>
+                                        <Col md={6}><Form.Group className="mb-3"><Form.Label>Nouveau Twilio Account SID</Form.Label><Form.Control type="text" name="twilioSid" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group></Col>
+                                        <Col md={6}><Form.Group className="mb-3"><Form.Label>Nouveau Twilio Auth Token</Form.Label><Form.Control type="password" name="twilioToken" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group></Col>
+                                    </Row>
+                                    <Form.Group className="mb-3"><Form.Label>Nouveau Numéro WhatsApp Twilio</Form.Label><Form.Control type="text" name="twilioWhatsappNumber" placeholder="Laisser vide pour ne pas changer" onChange={handleChange} /></Form.Group>
+                                    <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                                      <Button type="submit" variant="primary" className="w-100 mt-2">Mettre à jour les Paramètres</Button>
+                                    </motion.div>
+                                </Form>
                             </Card.Body>
                         </Card>
                     </motion.div>
                 </Col>
-            ))}
-        </Row>
-        {/* Boutons d'action */}
-        <motion.div variants={cardVariants} initial="offscreen" whileInView="onscreen" viewport={{ once: true, amount: 0.5 }}>
-            <Card className="shadow-sm border-0 mb-4">
-                <Card.Body className="text-center">
-                    <Button variant="primary" size="lg" onClick={() => setShowClientModal(true)} className="m-2"><FaUserPlus className="me-2"/> Ajouter Client</Button>
-                    <Button variant="success" size="lg" onClick={() => setShowSurveyModal(true)} className="m-2"><FaWpforms className="me-2"/>Créer Sondage</Button>
-                    <Button variant="info" size="lg" onClick={() => setShowCommunicationModal(true)} className="m-2 text-white"><FaPaperPlane className="me-2"/>Envoyer Communication</Button>
-                </Card.Body>
-            </Card>
+            </Row>
         </motion.div>
-        
-        <Row>
-            {/* Table des clients */}
-            <Col xl={12} className="mb-4">
-                <motion.div variants={cardVariants} initial="offscreen" whileInView="onscreen" viewport={{ once: true, amount: 0.5 }}>
-                <Card className="shadow-sm border-0"><Card.Header as="h4">Vos Clients</Card.Header><Card.Body><Table striped bordered hover responsive><thead align="center"><tr><th>Nom</th><th>Email</th><th>WhatsApp</th><th>Statut</th></tr></thead><tbody>{clients.length > 0 ? clients.map(client => (<tr key={client._id}><td>{client.name}</td><td>{client.email}</td><td>{client.whatsapp}</td><td><span className={`badge bg-${client.status === 'Vérifié' ? 'success' : 'warning'}`}>{client.status}</span></td></tr>)) : <tr><td colSpan="4" className="text-center p-4 text-muted">Aucun client ajouté pour le moment.</td></tr>}</tbody></Table></Card.Body></Card>
-                </motion.div>
-            </Col>
-            {/* Table des sondages */}
-            <Col xl={12}>
-                <motion.div variants={cardVariants} initial="offscreen" whileInView="onscreen" viewport={{ once: true, amount: 0.5 }}>
-                <Card className="shadow-sm border-0"><Card.Header as="h4">Vos Sondages</Card.Header><Card.Body><Table striped bordered hover responsive><thead align="center"><tr><th>Titre</th><th>Questions</th><th>Actions</th></tr></thead><tbody>{surveys.length > 0 ? surveys.map(survey => (<tr key={survey._id}><td>{survey.title}</td><td className="text-center">{survey.questions.length}</td><td className="text-center"><Button variant="outline-primary" size="sm" onClick={() => viewSurveyResults(survey._id)}><FaEye className="me-1"/>Voir Résultats</Button></td></tr>)) : <tr><td colSpan="3" className="text-center p-4 text-muted">Aucun sondage créé.</td></tr>}</tbody></Table></Card.Body></Card>
-                </motion.div>
-            </Col>
-        </Row>
-      </Container>
-      </motion.div>
-      <AddClientModal show={showClientModal} handleClose={() => setShowClientModal(false)} onClientAdded={(newClient) => setClients(prev => [...prev, newClient])} />
-      <CreateSurveyModal show={showSurveyModal} handleClose={() => setShowSurveyModal(false)} onSurveyCreated={(newSurvey) => setSurveys(prev => [...prev, newSurvey])} />
-      {showCommunicationModal && <SendCommunicationModal show={showCommunicationModal} handleClose={() => setShowCommunicationModal(false)} clients={clients} surveys={surveys}/>}
-      {showResultsModal && <SurveyResultsModal show={showResultsModal} handleClose={() => setShowResultsModal(false)} surveyId={selectedSurveyId} />}
-    </>
-  );
+    );
 }
 
 // --- COMPOSANT : Page publique de sondage ---
@@ -551,35 +917,118 @@ function PublicSurvey() {
     );
 }
 
-// --- COMPOSANT : Barre de navigation principale ---
-const AppNavbar = () => {
-    const [companyName, setCompanyName] = useState('');
-    const navigate = useNavigate();
-    useEffect(() => {
-        const token = localStorage.getItem('token');
-        if (token) { setCompanyName(jwtDecode(token).name); }
-    }, []);
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        toast.info("Vous avez été déconnecté.");
-        navigate('/login');
-    };
+// =================================================================
+// --- COMPOSANTS DE LAYOUT ---
+// =================================================================
 
+// --- NOUVEAU --- COMPOSANT : Sidebar ---
+const Sidebar = ({ isSidebarOpen }) => {
+    const { companyName } = useAuth();
+    const navItems = [
+        { path: "/dashboard", icon: FaTachometerAlt, label: "Dashboard" },
+        { path: "/clients", icon: FaUsers, label: "Clients" },
+        { path: "/surveys", icon: FaWpforms, label: "Sondages" },
+        { path: "/settings", icon: FaCog, label: "Paramètres" },
+    ];
     return (
-        <Navbar bg="dark" variant="dark" expand="lg" sticky="top" className="shadow-sm">
+        <motion.div className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
+            <div className="sidebar-header">
+                <FaBuilding className="me-2"/>
+                <h3 className="fs-5 mb-0">{companyName || "Mon App"}</h3>
+            </div>
+            <Nav className="flex-column">
+                {navItems.map(item => (
+                    <motion.div key={item.path} whileHover={{ x: 5 }} whileTap={{ scale: 0.95 }}>
+                         <Nav.Link as={NavLink} to={item.path} className="nav-link-custom">
+                            <item.icon className="me-3" /><span>{item.label}</span>
+                         </Nav.Link>
+                    </motion.div>
+                ))}
+            </Nav>
+        </motion.div>
+    );
+}
+
+// --- NOUVEAU --- COMPOSANT : AppHeader ---
+const AppHeader = ({ toggleSidebar }) => {
+    const { companyName, logout } = useAuth();
+    return (
+        <Navbar bg="light" expand="lg" className="shadow-sm app-header">
             <Container fluid>
-                <Navbar.Brand as={Link} to="/dashboard" className="fw-bold">{companyName}</Navbar.Brand>
+                <Button variant="outline-secondary" onClick={toggleSidebar} className="me-2 d-lg-none">
+                    <FaBars />
+                </Button>
                 <Navbar.Toggle aria-controls="basic-navbar-nav" />
                 <Navbar.Collapse id="basic-navbar-nav">
-                    <Nav className="me-auto">
-                        <Nav.Link as={Link} to="/settings"><FaCog className="me-1"/>Paramètres</Nav.Link>
+                    <Nav className="ms-auto align-items-center">
+                        <Dropdown align="end">
+                            <Dropdown.Toggle as={Nav.Link} className="p-0">
+                                Bienvenue, <strong>{companyName}</strong>
+                            </Dropdown.Toggle>
+                            <Dropdown.Menu>
+                                <Dropdown.Item as={Link} to="/settings"><FaCog className="me-2" />Paramètres</Dropdown.Item>
+                                <Dropdown.Divider />
+                                <Dropdown.Item onClick={logout} className="text-danger"><FaSignOutAlt className="me-2" />Déconnexion</Dropdown.Item>
+                            </Dropdown.Menu>
+                        </Dropdown>
                     </Nav>
-                    <Button variant="outline-danger" onClick={handleLogout}><FaSignOutAlt className="me-1"/>Déconnexion</Button>
                 </Navbar.Collapse>
             </Container>
         </Navbar>
     );
-}
+};
+
+// --- NOUVEAU --- LAYOUTS ---
+const AuthLayout = ({ children }) => (
+    <Container fluid className="d-flex align-items-center justify-content-center auth-container">
+        <AnimatePresence mode="wait">
+            {children}
+        </AnimatePresence>
+    </Container>
+);
+
+const DashboardLayout = () => {
+    const [isSidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 992);
+    const location = useLocation();
+
+    useEffect(() => {
+        const handleResize = () => {
+            if (window.innerWidth < 992) {
+                setSidebarOpen(false);
+            } else {
+                setSidebarOpen(true);
+            }
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
+    
+    useEffect(() => {
+        if(window.innerWidth < 992) setSidebarOpen(false);
+    }, [location]);
+
+    const toggleSidebar = () => setSidebarOpen(!isSidebarOpen);
+
+    return (
+        <div className="dashboard-layout">
+            <Sidebar isSidebarOpen={isSidebarOpen} />
+            <div className="main-content">
+                <AppHeader toggleSidebar={toggleSidebar} />
+                <main className="content-fluid p-4">
+                    <AnimatePresence mode="wait">
+                         <Routes location={location} key={location.pathname}>
+                            <Route path="/dashboard" element={<Dashboard />} />
+                            <Route path="/clients" element={<Clients />} />
+                            <Route path="/surveys" element={<SurveysPage />} />
+                            <Route path="/settings" element={<Settings />} />
+                            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                        </Routes>
+                    </AnimatePresence>
+                </main>
+            </div>
+        </div>
+    );
+};
 
 
 // =================================================================
@@ -590,30 +1039,131 @@ function App() {
     <>
     <style type="text/css">{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap');
-        body {
-            background-color: #f4f7f6;
-            background-image: linear-gradient(to top, #dfe9f3 0%, white 100%);
-            font-family: 'Inter', sans-serif;
+        :root {
+            --primary-color: #0d6efd;
+            --sidebar-bg: #111827;
+            --sidebar-text: #adb5bd;
+            --sidebar-text-hover: #ffffff;
+            --content-bg: #F9FAFB;
         }
-        .card { border-radius: 15px; }
+        body {
+            background-color: var(--content-bg);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+        .card { border-radius: 15px; border: none; }
         .form-control, .form-select { border-radius: 8px; }
-        .btn { border-radius: 8px; font-weight: 500; }
+        .btn { border-radius: 8px; font-weight: 500; transition: all 0.2s ease-in-out; }
         .modal-content { border-radius: 15px; }
         .Toastify__toast { border-radius: 12px; }
+
+        /* Auth Layout */
+        .auth-container {
+            min-height: 100vh;
+            background-color: #f4f7f6;
+            background-image: linear-gradient(to top, #dfe9f3 0%, white 100%);
+        }
+
+        /* Dashboard Layout */
+        .dashboard-layout { display: flex; min-height: 100vh; }
+        .sidebar {
+            width: 260px;
+            flex-shrink: 0;
+            background-color: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            padding: 1rem;
+            transition: margin-left 0.3s ease-in-out;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-header {
+            padding: 1rem;
+            text-align: center;
+            color: white;
+            border-bottom: 1px solid #374151;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .nav-link-custom {
+            color: var(--sidebar-text);
+            padding: 0.8rem 1rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        .nav-link-custom:hover, .nav-link-custom.active {
+            background-color: #374151;
+            color: var(--sidebar-text-hover);
+        }
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            transition: margin-left 0.3s ease-in-out;
+            overflow-x: hidden;
+        }
+        .app-header { background-color: #ffffff !important; }
+        .card-lift { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
+        .card-lift:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15)!important;
+        }
+        .table {
+          --bs-table-hover-bg: #f8f9fa;
+        }
+        .align-middle {
+          vertical-align: middle;
+        }
+        
+        /* NOUVEAU CSS pour la modale de communication */
+        .channel-card {
+            cursor: pointer;
+            position: relative;
+        }
+        .channel-card.selected {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--primary-color);
+        }
+        .checkmark-icon {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+
+        /* Responsive Sidebar */
+        @media (max-width: 991.98px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                height: 100%;
+                z-index: 1050;
+                margin-left: -260px;
+            }
+            .sidebar.open {
+                margin-left: 0;
+            }
+            .main-content {
+                margin-left: 0 !important;
+                width: 100%;
+            }
+        }
     `}</style>
     <Router>
-      <ToastContainer position="bottom-right" autoClose={4000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="colored" />
-      <AnimatePresence mode="wait">
-        <Routes>
-            <Route path="/survey/:surveyId" element={<PublicSurvey />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
-            <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
-            <Route path="*" element={<Navigate to="/login" />} />
-        </Routes>
-      </AnimatePresence>
+        <AuthProvider>
+            <Routes>
+                <Route path="/survey/:surveyId" element={<PublicSurvey />} />
+                <Route path="/login" element={<AuthLayout><Login /></AuthLayout>} />
+                <Route path="/register" element={<AuthLayout><Register /></AuthLayout>} />
+                <Route path="/*" element={<PrivateRoute><DashboardLayout /></PrivateRoute>} />
+            </Routes>
+        </AuthProvider>
     </Router>
+    <ToastContainer position="bottom-right" autoClose={4000} hideProgressBar={false} newestOnTop={false} closeOnClick rtl={false} pauseOnFocusLoss draggable pauseOnHover theme="colored" />
     </>
   );
 }
