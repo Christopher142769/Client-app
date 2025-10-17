@@ -223,7 +223,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             const twilioClient = twilio(sid, token);
 
             // ⚠️ ACTION REQUISE : Remplacez cette valeur par le Content SID de VOTRE template approuvé !
-            const templateSid = 'HX................................'; // <-- METTEZ VOTRE VRAI SID ICI
+            const templateSid = 'HX62704f48178b828b886af99670ce2b35'; // <-- METTEZ VOTRE VRAI SID ICI
 
             if (templateSid === 'HX................................') {
                  return res.status(400).json({ message: "Action requise : Veuillez configurer le 'templateSid' dans le code du backend (server.js)." });
