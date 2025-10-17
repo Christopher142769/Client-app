@@ -121,16 +121,14 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/clients', authMiddleware, async (req, res) => { try { const { name, whatsapp, email, status } = req.body; const newClient = new Client({ name, whatsapp, email, status, companyId: req.company.id }); await newClient.save(); res.status(201).json(newClient); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
 app.get('/api/clients', authMiddleware, async (req, res) => { try { const clients = await Client.find({ companyId: req.company.id }); res.json(clients); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
 
-// =================================================================
-// --- NOUVELLES ROUTES POUR L'ÉDITION ET LA SUPPRESSION DE CLIENTS ---
-// =================================================================
+// --- Routes pour l'édition et la suppression de clients ---
 app.put('/api/clients/:id', authMiddleware, async (req, res) => {
     try {
         const { name, whatsapp, email, status } = req.body;
         const updatedClient = await Client.findOneAndUpdate(
             { _id: req.params.id, companyId: req.company.id },
             { name, whatsapp, email, status },
-            { new: true } // Renvoie le document mis à jour
+            { new: true }
         );
         if (!updatedClient) {
             return res.status(404).json({ message: "Client non trouvé ou non autorisé." });
@@ -152,9 +150,6 @@ app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
     }
 });
-// =================================================================
-// --- FIN DES NOUVELLES ROUTES ---
-// =================================================================
 
 // --- Routes des Sondages ---
 app.post('/api/surveys', authMiddleware, async (req, res) => { try { const { title, questions } = req.body; const newSurvey = new Survey({ title, questions, companyId: req.company.id }); await newSurvey.save(); res.status(201).json(newSurvey); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
@@ -181,7 +176,9 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
     } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); }
 });
 
-// --- Route d'envoi de communication ---
+// =================================================================
+// --- ROUTE DE COMMUNICATION MODIFIÉE ---
+// =================================================================
 app.post('/api/communications/send', authMiddleware, async (req, res) => {
     try {
         const company = await Company.findById(req.company.id);
@@ -196,44 +193,49 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         
         if (recipients.length === 0) { return res.status(400).json({ message: "Aucun destinataire trouvé." }); }
         
+        // On prépare le contenu qui sera envoyé, qu'il vienne d'un message ou d'un sondage
+        let contentToSend = '';
+        if (message) {
+            contentToSend = message;
+        } else if (surveyId) {
+            const survey = await Survey.findById(surveyId);
+            if (!survey) return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
+            const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`;
+            contentToSend = `Veuillez répondre à notre sondage "${survey.title}" en cliquant sur ce lien : ${surveyUrl}`;
+        } else {
+            return res.status(400).json({ message: "Veuillez fournir un 'message' ou un 'surveyId'." });
+        }
+
         if (channel === 'email') {
-            let contentToSend = '';
-            if (message) {  contentToSend = message; } 
-            else if (surveyId) { 
-                const survey = await Survey.findById(surveyId);
-                if (!survey) return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
-                contentToSend = `Bonjour, veuillez répondre à notre sondage "${survey.title}" ici: https://client-app-j02r.onrender.com/survey/${survey._id}`; 
-            }
             const appPassword = decrypt(company.emailAppPassword);
             if (!appPassword) return res.status(400).json({ message: "Veuillez configurer votre mot de passe d'application Gmail." });
+            
             const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: company.email, pass: appPassword }});
             const emailPromises = recipients.map(r => transporter.sendMail({ from: `"${company.name}" <${company.email}>`, to: r.email, subject: `Message de ${company.name}`, text: contentToSend }));
             await Promise.all(emailPromises);
 
         } else if (channel === 'whatsapp') {
-            if (!surveyId) { return res.status(400).json({ message: "Pour initier une conversation WhatsApp, vous devez envoyer un sondage via un modèle approuvé." }); }
-
             const sid = decrypt(company.twilioSid);
             const token = decrypt(company.twilioToken);
             const fromNumber = decrypt(company.twilioWhatsappNumber);
             if (!sid || !token || !fromNumber) return res.status(400).json({ message: "Veuillez configurer vos identifiants Twilio." });
             
             const twilioClient = twilio(sid, token);
-            
-            const survey = await Survey.findById(surveyId);
-            if (!survey) {
-                return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
+
+            // ⚠️ ACTION REQUISE : Remplacez cette valeur par le Content SID de VOTRE template approuvé !
+            const templateSid = 'HX................................'; // <-- METTEZ VOTRE VRAI SID ICI
+
+            if (templateSid === 'HX................................') {
+                 return res.status(400).json({ message: "Action requise : Veuillez configurer le 'templateSid' dans le code du backend (server.js)." });
             }
             
-            const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`; 
-
-            const whatsappPromises = recipients.map(r => twilioClient.messages.create({
+            const whatsappPromises = recipients.map(recipient => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
-                to: `whatsapp:${r.whatsapp}`,
-                contentSid: 'HX132fe266db19e5cfce7128dc6a2ec4f6',
+                to: `whatsapp:${recipient.whatsapp}`,
+                contentSid: templateSid,
+                // On utilise notre 'contentToSend' qui contient soit le message simple, soit l'invitation au sondage
                 contentVariables: JSON.stringify({
-                    '2': survey.title,
-                    '3': surveyUrl
+                    '1': contentToSend 
                 })
             }));
 
@@ -246,6 +248,9 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         res.status(500).json({ message: 'Erreur du serveur lors de l\'envoi', error: error.message });
     }
 });
+// =================================================================
+// --- FIN DE LA ROUTE MODIFIÉE ---
+// =================================================================
 
 // --- Route pour les paramètres de l'entreprise ---
 app.put('/api/company/settings', authMiddleware, async (req, res) => {
