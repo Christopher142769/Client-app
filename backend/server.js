@@ -120,8 +120,6 @@ app.post('/api/auth/login', async (req, res) => {
 // --- Routes des Clients ---
 app.post('/api/clients', authMiddleware, async (req, res) => { try { const { name, whatsapp, email, status } = req.body; const newClient = new Client({ name, whatsapp, email, status, companyId: req.company.id }); await newClient.save(); res.status(201).json(newClient); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
 app.get('/api/clients', authMiddleware, async (req, res) => { try { const clients = await Client.find({ companyId: req.company.id }); res.json(clients); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
-
-// --- Routes pour l'édition et la suppression de clients ---
 app.put('/api/clients/:id', authMiddleware, async (req, res) => {
     try {
         const { name, whatsapp, email, status } = req.body;
@@ -130,32 +128,21 @@ app.put('/api/clients/:id', authMiddleware, async (req, res) => {
             { name, whatsapp, email, status },
             { new: true }
         );
-        if (!updatedClient) {
-            return res.status(404).json({ message: "Client non trouvé ou non autorisé." });
-        }
+        if (!updatedClient) { return res.status(404).json({ message: "Client non trouvé ou non autorisé." }); }
         res.json(updatedClient);
-    } catch (error) {
-        res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
-    }
+    } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); }
 });
-
 app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
     try {
         const deletedClient = await Client.findOneAndDelete({ _id: req.params.id, companyId: req.company.id });
-        if (!deletedClient) {
-            return res.status(404).json({ message: "Client non trouvé ou non autorisé." });
-        }
+        if (!deletedClient) { return res.status(404).json({ message: "Client non trouvé ou non autorisé." }); }
         res.json({ message: "Client supprimé avec succès." });
-    } catch (error) {
-        res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
-    }
+    } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); }
 });
 
 // --- Routes des Sondages ---
 app.post('/api/surveys', authMiddleware, async (req, res) => { try { const { title, questions } = req.body; const newSurvey = new Survey({ title, questions, companyId: req.company.id }); await newSurvey.save(); res.status(201).json(newSurvey); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
 app.get('/api/surveys', authMiddleware, async (req, res) => { try { const surveys = await Survey.find({ companyId: req.company.id }).select('-responses'); res.json(surveys); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
-
-// --- Route des résultats de sondage ---
 app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
     try {
         const survey = await Survey.findOne({ _id: req.params.id, companyId: req.company.id });
@@ -177,10 +164,53 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
 });
 
 // =================================================================
-// --- ROUTE DE COMMUNICATION MODIFIÉE ---
+// --- FONCTION HELPER POUR L'ENVOI D'EMAILS EN TÂCHE DE FOND ---
 // =================================================================
+
+/**
+ * Envoie des emails en arrière-plan sans bloquer la requête HTTP.
+ * Elle a son propre try/catch car elle s'exécute indépendamment.
+ */
+const sendEmailsInBackground = async (company, recipients, contentToSend) => {
+    try {
+        // On doit re-décrypter le mot de passe car cette fonction est séparée
+        const appPassword = decrypt(company.emailAppPassword);
+        if (!appPassword) {
+            console.error(`[BG JOB FAILED] Pas de mot de passe d'application pour ${company.name}`);
+            return; // Arrête la fonction
+        }
+        
+        const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: company.email, pass: appPassword }});
+        
+        let emailsSent = 0;
+        let emailsFailed = 0;
+
+        console.log(`[BG JOB STARTED] Démarrage de l'envoi d'emails pour ${company.name} à ${recipients.length} clients.`);
+
+        for (const recipient of recipients) {
+            try {
+                await transporter.sendMail({
+                    from: `"${company.name}" <${company.email}>`,
+                    to: recipient.email,
+                    subject: `Message de ${company.name}`,
+                    text: contentToSend
+                });
+                emailsSent++;
+            } catch (emailError) {
+                console.error(`[BG JOB] Échec de l'envoi à ${recipient.email}: ${emailError.message}`);
+                emailsFailed++;
+            }
+        }
+        
+        console.log(`[BG JOB SUCCESS] Envoi d'email terminé pour ${company.name}. Succès: ${emailsSent}, Échecs: ${emailsFailed}`);
+
+    } catch (error) {
+        console.error(`[BG JOB CRITICAL FAIL] Erreur fatale lors de l'envoi d'emails pour ${company.name}: ${error.message}`);
+    }
+};
+
 // =================================================================
-// --- ROUTE DE COMMUNICATION MODIFIÉE ---
+// --- ROUTE DE COMMUNICATION MODIFIÉE (CORRECTIF TIMEOUT 499) ---
 // =================================================================
 app.post('/api/communications/send', authMiddleware, async (req, res) => {
     try {
@@ -209,41 +239,16 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         }
 
         if (channel === 'email') {
-            const appPassword = decrypt(company.emailAppPassword);
-            if (!appPassword) return res.status(400).json({ message: "Veuillez configurer votre mot de passe d'application Gmail." });
             
-            // On crée le transporter une seule fois
-            const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: company.email, pass: appPassword }});
+            // 1. RÉPONDRE IMMÉDIATEMENT AU CLIENT pour éviter le timeout
+            res.json({ success: true, message: `L'envoi par EMAIL a été démarré en arrière-plan pour ${recipients.length} client(s).` });
             
-            let emailsSent = 0;
-            let emailsFailed = 0;
-
-            // On envoie les emails un par un (en série) pour ne pas être bloqué par Google
-            for (const recipient of recipients) {
-                try {
-                    await transporter.sendMail({
-                        from: `"${company.name}" <${company.email}>`,
-                        to: recipient.email,
-                        subject: `Message de ${company.name}`,
-                        text: contentToSend
-                    });
-                    emailsSent++;
-                    // Optionnel: Mettre une petite pause pour être encore plus prudent
-                    // await new Promise(resolve => setTimeout(resolve, 200)); // 0.2 sec
-                } catch (emailError) {
-                    console.error(`Échec de l'envoi à ${recipient.email}: ${emailError.message}`);
-                    emailsFailed++;
-                }
-            }
+            // 2. DÉMARRER LA TÂCHE DE FOND (sans "await")
+            // Le code continue, et cette fonction s'exécute de son côté.
+            sendEmailsInBackground(company, recipients, contentToSend);
             
-            console.log(`Envoi d'email terminé. Succès: ${emailsSent}, Échecs: ${emailsFailed}`);
-            
-            // On ne bloque plus avec Promise.all
-            // const emailPromises = recipients.map(r => transporter.sendMail(...));
-            // await Promise.all(emailPromises);
-
         } else if (channel === 'whatsapp') {
-            // (La logique WhatsApp reste inchangée)
+            // La logique WhatsApp est rapide, on peut la garder avec "await"
             const sid = decrypt(company.twilioSid);
             const token = decrypt(company.twilioToken);
             const fromNumber = decrypt(company.twilioWhatsappNumber);
@@ -251,13 +256,9 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             
             const twilioClient = twilio(sid, token);
 
-            // ⚠️ Mettez ici le SID de votre template une fois qu'il sera APPROUVÉ
-            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; // C'est le SID de "copy_notification_service"
+            // C'est le SID de "copy_notification_service" qui est "Under Review"
+            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; 
 
-            if (templateSid === 'HX................................') {
-                 return res.status(400).json({ message: "Action requise : Veuillez configurer le 'templateSid' dans le code du backend (server.js)." });
-            }
-            
             const whatsappPromises = recipients.map(recipient => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
                 to: `whatsapp:${recipient.whatsapp}`,
@@ -267,13 +268,21 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
                 })
             }));
 
+            // On attend que TOUTES les demandes à Twilio soient parties
             await Promise.all(whatsappPromises);
-        }
 
-        res.json({ success: true, message: `Communication envoyée via ${channel.toUpperCase()} à ${recipients.length} client(s).` });
+            // On répond au client APRÈS que Twilio a accepté les demandes
+            res.json({ success: true, message: `Communication envoyée via ${channel.toUpperCase()} à ${recipients.length} client(s).` });
+        }
+        
+        // Note: On n'envoie pas de réponse ici car elle est déjà gérée dans les blocs if/else
+
     } catch (error) {
         console.error("ERREUR D'ENVOI:", error);
-        res.status(500).json({ message: 'Erreur du serveur lors de l\'envoi', error: error.message });
+        // S'assurer de ne pas envoyer de réponse si elle a déjà été envoyée (dans le cas de l'email)
+        if (!res.headersSent) {
+            res.status(500).json({ message: 'Erreur du serveur lors de l\'envoi', error: error.message });
+        }
     }
 });
 // =================================================================
