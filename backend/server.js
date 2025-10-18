@@ -179,6 +179,9 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
 // =================================================================
 // --- ROUTE DE COMMUNICATION MODIFIÉE ---
 // =================================================================
+// =================================================================
+// --- ROUTE DE COMMUNICATION MODIFIÉE ---
+// =================================================================
 app.post('/api/communications/send', authMiddleware, async (req, res) => {
     try {
         const company = await Company.findById(req.company.id);
@@ -193,7 +196,6 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         
         if (recipients.length === 0) { return res.status(400).json({ message: "Aucun destinataire trouvé." }); }
         
-        // On prépare le contenu qui sera envoyé, qu'il vienne d'un message ou d'un sondage
         let contentToSend = '';
         if (message) {
             contentToSend = message;
@@ -210,11 +212,38 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             const appPassword = decrypt(company.emailAppPassword);
             if (!appPassword) return res.status(400).json({ message: "Veuillez configurer votre mot de passe d'application Gmail." });
             
+            // On crée le transporter une seule fois
             const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: company.email, pass: appPassword }});
-            const emailPromises = recipients.map(r => transporter.sendMail({ from: `"${company.name}" <${company.email}>`, to: r.email, subject: `Message de ${company.name}`, text: contentToSend }));
-            await Promise.all(emailPromises);
+            
+            let emailsSent = 0;
+            let emailsFailed = 0;
+
+            // On envoie les emails un par un (en série) pour ne pas être bloqué par Google
+            for (const recipient of recipients) {
+                try {
+                    await transporter.sendMail({
+                        from: `"${company.name}" <${company.email}>`,
+                        to: recipient.email,
+                        subject: `Message de ${company.name}`,
+                        text: contentToSend
+                    });
+                    emailsSent++;
+                    // Optionnel: Mettre une petite pause pour être encore plus prudent
+                    // await new Promise(resolve => setTimeout(resolve, 200)); // 0.2 sec
+                } catch (emailError) {
+                    console.error(`Échec de l'envoi à ${recipient.email}: ${emailError.message}`);
+                    emailsFailed++;
+                }
+            }
+            
+            console.log(`Envoi d'email terminé. Succès: ${emailsSent}, Échecs: ${emailsFailed}`);
+            
+            // On ne bloque plus avec Promise.all
+            // const emailPromises = recipients.map(r => transporter.sendMail(...));
+            // await Promise.all(emailPromises);
 
         } else if (channel === 'whatsapp') {
+            // (La logique WhatsApp reste inchangée)
             const sid = decrypt(company.twilioSid);
             const token = decrypt(company.twilioToken);
             const fromNumber = decrypt(company.twilioWhatsappNumber);
@@ -222,8 +251,8 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             
             const twilioClient = twilio(sid, token);
 
-            // ⚠️ ACTION REQUISE : Remplacez cette valeur par le Content SID de VOTRE template approuvé !
-            const templateSid = 'HX62704f48178b828b886af99670ce2b35'; // <-- METTEZ VOTRE VRAI SID ICI
+            // ⚠️ Mettez ici le SID de votre template une fois qu'il sera APPROUVÉ
+            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; // C'est le SID de "copy_notification_service"
 
             if (templateSid === 'HX................................') {
                  return res.status(400).json({ message: "Action requise : Veuillez configurer le 'templateSid' dans le code du backend (server.js)." });
@@ -233,7 +262,6 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
                 from: `whatsapp:${fromNumber}`,
                 to: `whatsapp:${recipient.whatsapp}`,
                 contentSid: templateSid,
-                // On utilise notre 'contentToSend' qui contient soit le message simple, soit l'invitation au sondage
                 contentVariables: JSON.stringify({
                     '1': contentToSend 
                 })
