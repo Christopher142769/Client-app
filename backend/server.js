@@ -257,7 +257,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             const twilioClient = twilio(sid, token);
 
             // C'est le SID de "copy_notification_service" qui est "Under Review"
-            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; 
+            const templateSid = 'HXec8d194a315a6f200f9a9f9bf975b9b6'; 
 
             const whatsappPromises = recipients.map(recipient => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
