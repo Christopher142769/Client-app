@@ -54,6 +54,13 @@ const ClientSchema = new mongoose.Schema({
   email: { type: String, required: true },
   status: { type: String, enum: ['Vérifié', 'Non Vérifié'], required: true },
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+  // --- NOUVEAUX CHAMPS POUR LA VALIDATION WHATSAPP ---
+  numberStatus: { 
+    type: String, 
+    enum: ['Pending', 'Valid', 'Invalid'], 
+    default: 'Pending' 
+  },
+  e164Format: { type: String }, // Pour stocker le format E.164 validé
 });
 const Client = mongoose.model('Client', ClientSchema);
 
@@ -87,7 +94,91 @@ const authMiddleware = (req, res, next) => {
 };
 
 // =================================================================
-// 5. ROUTES DE L'API
+// 5. NOUVELLES FONCTIONS HELPERS
+// =================================================================
+
+/**
+ * Valide un numéro de téléphone en utilisant l'API Twilio Lookup v1.
+ * Renvoie le statut et le format E.164.
+ */
+const getNumberValidation = async (twilioClient, phoneNumber) => {
+  try {
+    const phoneData = await twilioClient.lookups.v1.phoneNumbers(phoneNumber).fetch();
+    return { status: 'Valid', e164Format: phoneData.phoneNumber };
+  } catch (error) {
+    // Le code 20404 signifie "Not Found", c'est-à-dire numéro invalide
+    console.warn(`[Lookup Failed] Numéro ${phoneNumber}: ${error.message}`);
+    return { status: 'Invalid', e164Format: null };
+  }
+};
+
+/**
+ * Tâche de fond pour valider le numéro d'un client et mettre à jour la BDD.
+ */
+const validateAndUpdateClient = async (companyId, clientId, phoneNumber) => {
+  try {
+    const company = await Company.findById(companyId);
+    if (!company) return; // L'entreprise n'existe pas
+
+    const sid = decrypt(company.twilioSid);
+    const token = decrypt(company.twilioToken);
+    if (!sid || !token) return; // Pas d'identifiants Twilio, on ne peut pas valider
+
+    const twilioClient = twilio(sid, token);
+    const validation = await getNumberValidation(twilioClient, phoneNumber);
+    
+    // Mettre à jour le client dans la BDD avec le nouveau statut
+    await Client.findByIdAndUpdate(clientId, {
+      numberStatus: validation.status,
+      e164Format: validation.e164Format
+    });
+
+    console.log(`[Validation Job] Client ${clientId} | Numéro ${phoneNumber} | Statut: ${validation.status}`);
+  } catch (error) {
+    console.error(`[Validation Job CRITICAL FAIL] pour client ${clientId}: ${error.message}`);
+  }
+};
+
+
+/**
+ * Envoie des emails en arrière-plan sans bloquer la requête HTTP.
+ */
+const sendEmailsInBackground = async (company, recipients, contentToSend) => {
+    try {
+        const appPassword = decrypt(company.emailAppPassword);
+        if (!appPassword) {
+            console.error(`[BG JOB FAILED] Pas de mot de passe d'application pour ${company.name}`);
+            return;
+        }
+        
+        const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: company.email, pass: appPassword }});
+        
+        let emailsSent = 0;
+        let emailsFailed = 0;
+        console.log(`[BG JOB STARTED] Démarrage de l'envoi d'emails pour ${company.name} à ${recipients.length} clients.`);
+
+        for (const recipient of recipients) {
+            try {
+                await transporter.sendMail({
+                    from: `"${company.name}" <${company.email}>`,
+                    to: recipient.email,
+                    subject: `Message de ${company.name}`,
+                    text: contentToSend
+                });
+                emailsSent++;
+            } catch (emailError) {
+                console.error(`[BG JOB] Échec de l'envoi à ${recipient.email}: ${emailError.message}`);
+                emailsFailed++;
+            }
+        }
+        console.log(`[BG JOB SUCCESS] Envoi d'email terminé pour ${company.name}. Succès: ${emailsSent}, Échecs: ${emailsFailed}`);
+    } catch (error) {
+        console.error(`[BG JOB CRITICAL FAIL] Erreur fatale lors de l'envoi d'emails pour ${company.name}: ${error.message}`);
+    }
+};
+
+// =================================================================
+// 6. ROUTES DE L'API (MISES À JOUR)
 // =================================================================
 
 // --- Routes d'Authentification ---
@@ -117,21 +208,69 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); }
 });
 
-// --- Routes des Clients ---
-app.post('/api/clients', authMiddleware, async (req, res) => { try { const { name, whatsapp, email, status } = req.body; const newClient = new Client({ name, whatsapp, email, status, companyId: req.company.id }); await newClient.save(); res.status(201).json(newClient); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
-app.get('/api/clients', authMiddleware, async (req, res) => { try { const clients = await Client.find({ companyId: req.company.id }); res.json(clients); } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); } });
+// --- Routes des Clients (MODIFIÉES) ---
+app.post('/api/clients', authMiddleware, async (req, res) => { 
+  try { 
+    const { name, whatsapp, email, status } = req.body; 
+    const newClient = new Client({ name, whatsapp, email, status, companyId: req.company.id }); 
+    await newClient.save(); 
+    
+    // --- NOUVEAU : Démarrer la validation en arrière-plan ---
+    // (On n'attend pas "await" pour répondre immédiatement)
+    validateAndUpdateClient(req.company.id, newClient._id, newClient.whatsapp);
+
+    res.status(201).json(newClient); 
+  } catch (error) { 
+    res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); 
+  } 
+});
+
+app.get('/api/clients', authMiddleware, async (req, res) => { 
+  try { 
+    // On trie pour voir les "Pending" et "Invalid" en premier
+    const clients = await Client.find({ companyId: req.company.id }).sort({ numberStatus: 1, name: 1 }); 
+    res.json(clients); 
+  } catch (error) { 
+    res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); 
+  } 
+});
+
 app.put('/api/clients/:id', authMiddleware, async (req, res) => {
     try {
         const { name, whatsapp, email, status } = req.body;
-        const updatedClient = await Client.findOneAndUpdate(
-            { _id: req.params.id, companyId: req.company.id },
-            { name, whatsapp, email, status },
-            { new: true }
+        
+        // --- NOUVEAU : Réinitialiser le statut si le numéro change ---
+        const clientToUpdate = await Client.findOne({ _id: req.params.id, companyId: req.company.id });
+        if (!clientToUpdate) {
+            return res.status(404).json({ message: "Client non trouvé." });
+        }
+        
+        let numberStatus = clientToUpdate.numberStatus;
+        if (whatsapp !== clientToUpdate.whatsapp) {
+            numberStatus = 'Pending'; // Le numéro a changé, il faut revalider
+        }
+
+        const updatedClient = await Client.findByIdAndUpdate(
+            req.params.id,
+            { name, whatsapp, email, status, numberStatus }, // On met à jour le statut
+            { new: true } 
         );
-        if (!updatedClient) { return res.status(404).json({ message: "Client non trouvé ou non autorisé." }); }
+
+        if (!updatedClient) {
+            return res.status(404).json({ message: "Client non trouvé ou non autorisé." });
+        }
+
+        // --- NOUVEAU : Démarrer la validation si elle est "Pending" ---
+        if (updatedClient.numberStatus === 'Pending') {
+            validateAndUpdateClient(req.company.id, updatedClient._id, updatedClient.whatsapp);
+        }
+
         res.json(updatedClient);
-    } catch (error) { res.status(500).json({ message: 'Erreur du serveur.', error: error.message }); }
+    } catch (error) {
+        res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
+    }
 });
+
 app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
     try {
         const deletedClient = await Client.findOneAndDelete({ _id: req.params.id, companyId: req.company.id });
@@ -141,6 +280,7 @@ app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
 });
 
 // --- Routes des Sondages ---
+// (Inchangées)
 app.post('/api/surveys', authMiddleware, async (req, res) => { try { const { title, questions } = req.body; const newSurvey = new Survey({ title, questions, companyId: req.company.id }); await newSurvey.save(); res.status(201).json(newSurvey); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
 app.get('/api/surveys', authMiddleware, async (req, res) => { try { const surveys = await Survey.find({ companyId: req.company.id }).select('-responses'); res.json(surveys); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
 app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
@@ -164,53 +304,7 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
 });
 
 // =================================================================
-// --- FONCTION HELPER POUR L'ENVOI D'EMAILS EN TÂCHE DE FOND ---
-// =================================================================
-
-/**
- * Envoie des emails en arrière-plan sans bloquer la requête HTTP.
- * Elle a son propre try/catch car elle s'exécute indépendamment.
- */
-const sendEmailsInBackground = async (company, recipients, contentToSend) => {
-    try {
-        // On doit re-décrypter le mot de passe car cette fonction est séparée
-        const appPassword = decrypt(company.emailAppPassword);
-        if (!appPassword) {
-            console.error(`[BG JOB FAILED] Pas de mot de passe d'application pour ${company.name}`);
-            return; // Arrête la fonction
-        }
-        
-        const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user: company.email, pass: appPassword }});
-        
-        let emailsSent = 0;
-        let emailsFailed = 0;
-
-        console.log(`[BG JOB STARTED] Démarrage de l'envoi d'emails pour ${company.name} à ${recipients.length} clients.`);
-
-        for (const recipient of recipients) {
-            try {
-                await transporter.sendMail({
-                    from: `"${company.name}" <${company.email}>`,
-                    to: recipient.email,
-                    subject: `Message de ${company.name}`,
-                    text: contentToSend
-                });
-                emailsSent++;
-            } catch (emailError) {
-                console.error(`[BG JOB] Échec de l'envoi à ${recipient.email}: ${emailError.message}`);
-                emailsFailed++;
-            }
-        }
-        
-        console.log(`[BG JOB SUCCESS] Envoi d'email terminé pour ${company.name}. Succès: ${emailsSent}, Échecs: ${emailsFailed}`);
-
-    } catch (error) {
-        console.error(`[BG JOB CRITICAL FAIL] Erreur fatale lors de l'envoi d'emails pour ${company.name}: ${error.message}`);
-    }
-};
-
-// =================================================================
-// --- ROUTE DE COMMUNICATION MODIFIÉE (CORRECTIF TIMEOUT 499) ---
+// --- ROUTE DE COMMUNICATION (MODIFIÉE) ---
 // =================================================================
 app.post('/api/communications/send', authMiddleware, async (req, res) => {
     try {
@@ -219,12 +313,29 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         
         const { message, surveyId, channel, recipientType, status, clientIds } = req.body;
         
-        let recipients = [];
-        if (recipientType === 'all') { recipients = await Client.find({ companyId: req.company.id }); }
-        else if (recipientType === 'status') { recipients = await Client.find({ companyId: req.company.id, status }); }
-        else if (recipientType === 'selection') { recipients = await Client.find({ _id: { $in: clientIds }, companyId: req.company.id }); }
+        // --- MODIFIÉ : Ajout du filtre de validation de numéro ---
+        let baseQuery = { companyId: req.company.id };
         
-        if (recipients.length === 0) { return res.status(400).json({ message: "Aucun destinataire trouvé." }); }
+        // Si c'est un envoi WhatsApp, on AJOUTE la condition que le numéro doit être valide
+        if (channel === 'whatsapp') {
+            baseQuery.numberStatus = 'Valid';
+        }
+
+        let recipients = [];
+        if (recipientType === 'all') { 
+            recipients = await Client.find(baseQuery); 
+        } else if (recipientType === 'status') { 
+            baseQuery.status = status; // Ajoute le statut au filtre
+            recipients = await Client.find(baseQuery); 
+        } else if (recipientType === 'selection') { 
+            baseQuery._id = { $in: clientIds }; // Ajoute la sélection au filtre
+            recipients = await Client.find(baseQuery); 
+        }
+        // --- FIN DE LA MODIFICATION ---
+        
+        if (recipients.length === 0) { 
+            return res.status(400).json({ message: "Aucun destinataire valide trouvé pour cet envoi." }); 
+        }
         
         let contentToSend = '';
         if (message) {
@@ -239,16 +350,10 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         }
 
         if (channel === 'email') {
-            
-            // 1. RÉPONDRE IMMÉDIATEMENT AU CLIENT pour éviter le timeout
             res.json({ success: true, message: `L'envoi par EMAIL a été démarré en arrière-plan pour ${recipients.length} client(s).` });
-            
-            // 2. DÉMARRER LA TÂCHE DE FOND (sans "await")
-            // Le code continue, et cette fonction s'exécute de son côté.
             sendEmailsInBackground(company, recipients, contentToSend);
             
         } else if (channel === 'whatsapp') {
-            // La logique WhatsApp est rapide, on peut la garder avec "await"
             const sid = decrypt(company.twilioSid);
             const token = decrypt(company.twilioToken);
             const fromNumber = decrypt(company.twilioWhatsappNumber);
@@ -257,39 +362,44 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             const twilioClient = twilio(sid, token);
 
             // C'est le SID de "copy_notification_service" qui est "Under Review"
-            const templateSid = 'HXec8d194a315a6f200f9a9f9bf975b9b6'; 
+            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; // Mettez votre SID approuvé ici
 
             const whatsappPromises = recipients.map(recipient => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
-                to: `whatsapp:${recipient.whatsapp}`,
+                // --- MODIFIÉ : Utilisation du numéro E.164 validé ---
+                to: `whatsapp:${recipient.e164Format}`, 
                 contentSid: templateSid,
                 contentVariables: JSON.stringify({
                     '1': contentToSend 
                 })
             }));
 
-            // On attend que TOUTES les demandes à Twilio soient parties
-            await Promise.all(whatsappPromises);
+            // Nous utilisons Promise.allSettled pour ne pas échouer si un seul numéro plante
+            const results = await Promise.allSettled(whatsappPromises);
 
-            // On répond au client APRÈS que Twilio a accepté les demandes
-            res.json({ success: true, message: `Communication envoyée via ${channel.toUpperCase()} à ${recipients.length} client(s).` });
+            const sentCount = results.filter(r => r.status === 'fulfilled').length;
+            const failedCount = results.filter(r => r.status === 'rejected').length;
+
+            if (failedCount > 0) {
+                 console.error(`[WhatsApp Send] Échec partiel : ${failedCount} messages échoués.`);
+                 // On peut logger la première erreur pour le debug
+                 const firstError = results.find(r => r.status === 'rejected');
+                 console.error(firstError.reason.message);
+            }
+
+            res.json({ success: true, message: `Communication WhatsApp envoyée. Succès: ${sentCount}, Échecs: ${failedCount}.` });
         }
         
-        // Note: On n'envoie pas de réponse ici car elle est déjà gérée dans les blocs if/else
-
     } catch (error) {
         console.error("ERREUR D'ENVOI:", error);
-        // S'assurer de ne pas envoyer de réponse si elle a déjà été envoyée (dans le cas de l'email)
         if (!res.headersSent) {
             res.status(500).json({ message: 'Erreur du serveur lors de l\'envoi', error: error.message });
         }
     }
 });
-// =================================================================
-// --- FIN DE LA ROUTE MODIFIÉE ---
-// =================================================================
 
 // --- Route pour les paramètres de l'entreprise ---
+// (Inchangée)
 app.put('/api/company/settings', authMiddleware, async (req, res) => {
     try {
         const { emailAppPassword, twilioSid, twilioToken, twilioWhatsappNumber } = req.body;
@@ -308,9 +418,9 @@ app.put('/api/company/settings', authMiddleware, async (req, res) => {
 
 
 // =================================================================
-// 6. ROUTES PUBLIQUES POUR LES SONDAGES
+// 7. ROUTES PUBLIQUES POUR LES SONDAGES
 // =================================================================
-
+// (Inchangées)
 app.get('/api/public/surveys/:id', async (req, res) => {
     try {
         const survey = await Survey.findById(req.params.id).select('title questions');
@@ -338,7 +448,7 @@ app.post('/api/public/surveys/:id/responses', async (req, res) => {
 
 
 // =================================================================
-// 7. DÉMARRAGE DU SERVEUR
+// 8. DÉMARRAGE DU SERVEUR
 // =================================================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
