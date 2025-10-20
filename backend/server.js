@@ -62,6 +62,8 @@ const ClientSchema = new mongoose.Schema({
   },
   e164Format: { type: String },
 });
+// ⚡ AJOUT DE L'INDEX pour accélérer les recherches par entreprise et statut
+ClientSchema.index({ companyId: 1, numberStatus: 1 });
 const Client = mongoose.model('Client', ClientSchema);
 
 const SurveySchema = new mongoose.Schema({
@@ -78,6 +80,8 @@ const SurveySchema = new mongoose.Schema({
   }],
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
 });
+// ⚡ AJOUT DE L'INDEX pour accélérer les recherches par entreprise
+SurveySchema.index({ companyId: 1 });
 const Survey = mongoose.model('Survey', SurveySchema);
 
 // =================================================================
@@ -103,7 +107,6 @@ const getNumberValidation = async (twilioClient, phoneNumber) => {
     let normalizedNumber = phoneNumber.replace(/[^0-9+]/g, ''); // Garde chiffres et +
     if (!normalizedNumber.startsWith('+')) {
         // Hypothèse simple : si pas de +, c'est peut-être un numéro local (Bénin?)
-        // ATTENTION: Ceci est une simplification, idéalement il faudrait connaître le pays.
          if (normalizedNumber.length === 8) { // Longueur typique Bénin sans indicatif
             normalizedNumber = '+229' + normalizedNumber;
          } else {
@@ -243,6 +246,12 @@ const triggerPendingValidation = async (companyId) => {
 // 6. ROUTES DE L'API
 // =================================================================
 
+// 🌐 NOUVELLE ROUTE DE BASE : Ajout d'une route racine pour les checks de santé
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', service: 'Client-Back-rxhc API' });
+});
+
+
 // --- Routes d'Authentification ---
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -320,6 +329,7 @@ app.put('/api/clients/:id', authMiddleware, async (req, res) => {
         );
 
         if (updatedClient.numberStatus === 'Pending') {
+            // Relance la validation si le numéro a changé ou s'il est resté 'Pending'
             validateAndUpdateClient(req.company.id, updatedClient._id, updatedClient.whatsapp);
         }
 
@@ -339,10 +349,10 @@ app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
     }
 });
 
-// --- NOUVELLE ROUTE : Déclencher la validation des "Pending" ---
+// --- ROUTE DE DÉCLENCHEMENT DE VALIDATION (Rattrapage) ---
 app.post('/api/clients/trigger-pending-validation', authMiddleware, async (req, res) => {
     // On répond immédiatement pour ne pas bloquer le frontend
-    res.status(202).json({ message: "Demande de validation des clients en attente reçue." });
+    res.status(202).json({ message: "Demande de validation des clients en attente reçue. La tâche s'exécute en arrière-plan." });
 
     // On lance la tâche de fond (sans await)
     triggerPendingValidation(req.company.id);
@@ -536,8 +546,6 @@ cron.schedule('0 0 * * *', async () => {
       console.log(`[CRON JOB] Lancement de la validation pour : ${company.name} (${company._id})`);
       // On lance la validation sans 'await' pour ne pas bloquer
       // la boucle si une entreprise prend du temps.
-      // La fonction triggerPendingValidation a son propre flag (isValidationRunning)
-      // pour gérer la concurrence.
       triggerPendingValidation(company._id);
     }
     console.log('[CRON JOB] Tâches de validation lancées pour toutes les entreprises.');
