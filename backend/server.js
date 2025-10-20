@@ -422,6 +422,8 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         }
 
         let contentToSend = '';
+        let useTemplate = false; // Indicateur pour savoir s'il faut utiliser le modèle Twilio
+
         if (message) {
             contentToSend = message;
         } else if (surveyId) {
@@ -429,6 +431,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             if (!survey) return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
             const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`; 
             contentToSend = `Veuillez répondre à notre sondage "${survey.title}" en cliquant sur ce lien : ${surveyUrl}`;
+            useTemplate = true; // Le sondage doit utiliser le modèle
         } else {
             return res.status(400).json({ message: "Veuillez fournir un 'message' ou un 'surveyId'." });
         }
@@ -452,14 +455,14 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
                     to: `whatsapp:${recipient.e164Format}`, 
                 };
 
-                if (surveyId) {
-                    // C'est un SONDAGE, on utilise le template et les variables
+                if (useTemplate) {
+                    // SONDAGE : Utilise le template pour l'envoi HORS fenêtre 24h
                     messageConfig.contentSid = templateSid;
                     messageConfig.contentVariables = JSON.stringify({
-                        '1': contentToSend
+                        '1': contentToSend // <-- ENVOIE LA VARIABLE {1}
                     });
                 } else {
-                    // C'est un MESSAGE SIMPLE, on utilise le body standard (fenêtre 24h requise)
+                    // MESSAGE SIMPLE : Utilise le body (Fonctionne UNIQUEMENT DANS la fenêtre 24h)
                     messageConfig.body = contentToSend;
                 }
                 
@@ -485,7 +488,6 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         }
     }
 });
-
 // --- Route pour les paramètres de l'entreprise ---
 app.put('/api/company/settings', authMiddleware, async (req, res) => {
     try {
