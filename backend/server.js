@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
 const CryptoJS = require('crypto-js');
+const cron = require('node-cron'); // <--- AJOUTÉ
 
 const app = express();
 app.use(cors());
@@ -243,53 +244,6 @@ const triggerPendingValidation = async (companyId) => {
 // =================================================================
 
 // --- Routes d'Authentification ---
-app.post('/api/auth/register', async (req, res) => { /* ... Inchangé ... */ });
-app.post('/api/auth/login', async (req, res) => { /* ... Inchangé ... */ });
-
-
-// --- Routes des Clients ---
-app.post('/api/clients', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-app.get('/api/clients', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-app.put('/api/clients/:id', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-app.delete('/api/clients/:id', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-
-// --- NOUVELLE ROUTE : Déclencher la validation des "Pending" ---
-app.post('/api/clients/trigger-pending-validation', authMiddleware, async (req, res) => {
-    // On répond immédiatement pour ne pas bloquer le frontend
-    res.status(202).json({ message: "Demande de validation des clients en attente reçue." });
-
-    // On lance la tâche de fond (sans await)
-    triggerPendingValidation(req.company.id);
-});
-
-
-// --- Routes des Sondages ---
-app.post('/api/surveys', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-app.get('/api/surveys', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-
-// --- Route de Communication ---
-app.post('/api/communications/send', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-
-// --- Route pour les paramètres de l'entreprise ---
-app.put('/api/company/settings', authMiddleware, async (req, res) => { /* ... Inchangé ... */ });
-
-
-// =================================================================
-// 7. ROUTES PUBLIQUES POUR LES SONDAGES
-// =================================================================
-app.get('/api/public/surveys/:id', async (req, res) => { /* ... Inchangé ... */ });
-app.post('/api/public/surveys/:id/responses', async (req, res) => { /* ... Inchangé ... */ });
-
-
-// =================================================================
-// 8. DÉMARRAGE DU SERVEUR
-// =================================================================
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
-
-
-// --- Copier/Coller les routes inchangées depuis la version précédente ---
 app.post('/api/auth/register', async (req, res) => {
   try {
     const { name, whatsapp, email, password, passwordConfirm, emailAppPassword, twilioSid, twilioToken, twilioWhatsappNumber } = req.body;
@@ -322,6 +276,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 
+// --- Routes des Clients ---
 app.post('/api/clients', authMiddleware, async (req, res) => {
   try {
     const { name, whatsapp, email, status } = req.body;
@@ -383,8 +338,38 @@ app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
         res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
     }
 });
-app.post('/api/surveys', authMiddleware, async (req, res) => { try { const { title, questions } = req.body; const newSurvey = new Survey({ title, questions, companyId: req.company.id }); await newSurvey.save(); res.status(201).json(newSurvey); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
-app.get('/api/surveys', authMiddleware, async (req, res) => { try { const surveys = await Survey.find({ companyId: req.company.id }).select('-responses'); res.json(surveys); } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); } });
+
+// --- NOUVELLE ROUTE : Déclencher la validation des "Pending" ---
+app.post('/api/clients/trigger-pending-validation', authMiddleware, async (req, res) => {
+    // On répond immédiatement pour ne pas bloquer le frontend
+    res.status(202).json({ message: "Demande de validation des clients en attente reçue." });
+
+    // On lance la tâche de fond (sans await)
+    triggerPendingValidation(req.company.id);
+});
+
+
+// --- Routes des Sondages ---
+app.post('/api/surveys', authMiddleware, async (req, res) => { 
+    try { 
+        const { title, questions } = req.body; 
+        const newSurvey = new Survey({ title, questions, companyId: req.company.id }); 
+        await newSurvey.save(); 
+        res.status(201).json(newSurvey); 
+    } catch (error) { 
+        res.status(500).json({ message: 'Erreur du serveur', error: error.message }); 
+    } 
+});
+
+app.get('/api/surveys', authMiddleware, async (req, res) => { 
+    try { 
+        const surveys = await Survey.find({ companyId: req.company.id }).select('-responses'); 
+        res.json(surveys); 
+    } catch (error) { 
+        res.status(500).json({ message: 'Erreur du serveur', error: error.message }); 
+    } 
+});
+
 app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
     try {
         const survey = await Survey.findOne({ _id: req.params.id, companyId: req.company.id });
@@ -404,6 +389,8 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
         res.json(results);
     } catch (error) { res.status(500).json({ message: 'Erreur du serveur', error: error.message }); }
 });
+
+// --- Route de Communication ---
 app.post('/api/communications/send', authMiddleware, async (req, res) => {
     try {
         const company = await Company.findById(req.company.id);
@@ -437,7 +424,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         } else if (surveyId) {
             const survey = await Survey.findById(surveyId);
             if (!survey) return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
-            const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`;
+            const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`; // Adaptez ce lien si nécessaire
             contentToSend = `Veuillez répondre à notre sondage "${survey.title}" en cliquant sur ce lien : ${surveyUrl}`;
         } else {
             return res.status(400).json({ message: "Veuillez fournir un 'message' ou un 'surveyId'." });
@@ -455,7 +442,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
 
             const twilioClient = twilio(sid, token);
             // C'est le SID de "copy_notification_service" qui est approuvé
-            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6';
+            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; // Assurez-vous que c'est le bon SID
 
             const whatsappPromises = recipients.map(recipient => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
@@ -485,6 +472,8 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         }
     }
 });
+
+// --- Route pour les paramètres de l'entreprise ---
 app.put('/api/company/settings', authMiddleware, async (req, res) => {
     try {
         const { emailAppPassword, twilioSid, twilioToken, twilioWhatsappNumber } = req.body;
@@ -500,6 +489,11 @@ app.put('/api/company/settings', authMiddleware, async (req, res) => {
         res.status(500).json({ message: "Erreur du serveur.", error: error.message });
     }
 });
+
+
+// =================================================================
+// 7. ROUTES PUBLIQUES POUR LES SONDAGES
+// =================================================================
 app.get('/api/public/surveys/:id', async (req, res) => {
     try {
         const survey = await Survey.findById(req.params.id).select('title questions');
@@ -509,6 +503,7 @@ app.get('/api/public/surveys/:id', async (req, res) => {
         res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
     }
 });
+
 app.post('/api/public/surveys/:id/responses', async (req, res) => {
     try {
         const { clientName, answers } = req.body;
@@ -523,3 +518,40 @@ app.post('/api/public/surveys/:id/responses', async (req, res) => {
         res.status(500).json({ message: "Erreur lors de la soumission.", error: error.message });
     }
 });
+
+
+// =================================================================
+// 8. TÂCHES AUTOMATISÉES (CRON JOBS)
+// =================================================================
+
+// Tâche de validation des numéros 'Pending'
+// S'exécute tous les jours à minuit (fuseau horaire de Cotonou)
+cron.schedule('0 0 * * *', async () => {
+  console.log('[CRON JOB] Démarrage de la validation nocturne de TOUS les numéros "Pending".');
+  try {
+    const allCompanies = await Company.find({}).select('_id name');
+    console.log(`[CRON JOB] ${allCompanies.length} entreprise(s) trouvée(s).`);
+
+    for (const company of allCompanies) {
+      console.log(`[CRON JOB] Lancement de la validation pour : ${company.name} (${company._id})`);
+      // On lance la validation sans 'await' pour ne pas bloquer
+      // la boucle si une entreprise prend du temps.
+      // La fonction triggerPendingValidation a son propre flag (isValidationRunning)
+      // pour gérer la concurrence.
+      triggerPendingValidation(company._id);
+    }
+    console.log('[CRON JOB] Tâches de validation lancées pour toutes les entreprises.');
+  } catch (error) {
+    console.error('[CRON JOB] Erreur critique lors du lancement des tâches de validation:', error);
+  }
+}, {
+  scheduled: true,
+  timezone: "Africa/Porto-Novo" // Assurez-vous que c'est le bon fuseau horaire
+});
+
+
+// =================================================================
+// 9. DÉMARRAGE DU SERVEUR
+// =================================================================
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
