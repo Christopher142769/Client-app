@@ -10,7 +10,7 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
 const CryptoJS = require('crypto-js');
-const cron = require('node-cron'); // <--- AJOUTÉ
+const cron = require('node-cron'); 
 
 const app = express();
 app.use(cors());
@@ -62,7 +62,7 @@ const ClientSchema = new mongoose.Schema({
   },
   e164Format: { type: String },
 });
-// ⚡ AJOUT DE L'INDEX pour accélérer les recherches par entreprise et statut
+// AJOUT DE L'INDEX pour accélérer les recherches
 ClientSchema.index({ companyId: 1, numberStatus: 1 });
 const Client = mongoose.model('Client', ClientSchema);
 
@@ -80,7 +80,7 @@ const SurveySchema = new mongoose.Schema({
   }],
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
 });
-// ⚡ AJOUT DE L'INDEX pour accélérer les recherches par entreprise
+// AJOUT DE L'INDEX pour accélérer les recherches
 SurveySchema.index({ companyId: 1 });
 const Survey = mongoose.model('Survey', SurveySchema);
 
@@ -103,14 +103,11 @@ const authMiddleware = (req, res, next) => {
 
 const getNumberValidation = async (twilioClient, phoneNumber) => {
   try {
-    // Tentative de normalisation simple avant l'appel API
-    let normalizedNumber = phoneNumber.replace(/[^0-9+]/g, ''); // Garde chiffres et +
+    let normalizedNumber = phoneNumber.replace(/[^0-9+]/g, ''); 
     if (!normalizedNumber.startsWith('+')) {
-        // Hypothèse simple : si pas de +, c'est peut-être un numéro local (Bénin?)
-         if (normalizedNumber.length === 8) { // Longueur typique Bénin sans indicatif
+         if (normalizedNumber.length === 8) { 
             normalizedNumber = '+229' + normalizedNumber;
          } else {
-             // Si format inconnu, on laisse Twilio essayer de deviner
              console.warn(`[Lookup] Numéro ${phoneNumber} sans '+' détecté, format incertain.`);
          }
     }
@@ -131,10 +128,13 @@ const validateAndUpdateClient = async (companyId, clientId, phoneNumber) => {
     const sid = decrypt(company.twilioSid);
     const token = decrypt(company.twilioToken);
     if (!sid || !token) {
-        console.warn(`[Validation Job] Pas de SID/Token Twilio pour ${companyId}, validation annulée pour ${clientId}`);
-        // On marque comme invalide si on ne peut pas vérifier
-        await Client.findByIdAndUpdate(clientId, { numberStatus: 'Invalid', e164Format: null });
-        return;
+        // Log seulement si la compagnie devrait avoir ces infos pour une validation
+        if (phoneNumber.startsWith('+')) { // Si c'est un numéro international, on s'attend à Twilio
+             console.warn(`[Validation Job] Pas de SID/Token Twilio pour ${companyId}, validation annulée pour ${clientId}`);
+        }
+        // On ne marque plus Invalid ici car le client n'est pas forcément géré par Twilio, 
+        // mais on laisse le statut 'Pending' pour un nouveau job si Twilio est configuré plus tard.
+        return; 
     }
 
     const twilioClient = twilio(sid, token);
@@ -145,13 +145,46 @@ const validateAndUpdateClient = async (companyId, clientId, phoneNumber) => {
       e164Format: validation.e164Format
     });
 
-    console.log(`[Validation Job] Client ${clientId} | Statut: ${validation.status}`);
+    console.log(`[Validation Job] Client ${clientId} | Statut: ${validation.status} pour Company ${companyId}`);
   } catch (error) {
     console.error(`[Validation Job CRITICAL FAIL] pour client ${clientId}: ${error.message}`);
-     // Marquer comme Invalide en cas d'erreur critique
+     // Marquer comme Invalide en cas d'erreur critique de Twilio API
     try { await Client.findByIdAndUpdate(clientId, { numberStatus: 'Invalid', e164Format: null }); } catch (updateError) {}
   }
 };
+
+
+// 🔄 FONCTION DE RATTRAPAGE MODIFIÉE (SANS FLAG GLOBAL)
+const runValidationCatchup = async (companyId) => {
+  console.log(`[Validation Job] DÉMARRAGE RATTRAPAGE pour ${companyId}. Recherche des clients 'Pending'...`);
+
+  try {
+    // ⚡ Filtre par companyId pour que chaque entreprise gère ses propres clients
+    const pendingClients = await Client.find({ companyId: companyId, numberStatus: 'Pending' });
+
+    console.log(`[Validation Job] Trouvé ${pendingClients.length} clients 'Pending' pour ${companyId}.`);
+
+    if (pendingClients.length === 0) {
+      console.log(`[Validation Job] Rattrapage terminé pour ${companyId}: Aucun client trouvé.`);
+      return;
+    }
+
+    for (const client of pendingClients) {
+        const currentClientState = await Client.findById(client._id).select('numberStatus whatsapp');
+
+        if (currentClientState && currentClientState.numberStatus === 'Pending') {
+            await validateAndUpdateClient(companyId, client._id, client.whatsapp);
+            await new Promise(resolve => setTimeout(resolve, 500)); // Pause 0.5s
+        }
+    }
+
+    console.log(`[Validation Job] Validation de rattrapage terminée pour ${companyId}.`);
+
+  } catch (error) {
+    console.error(`[Validation Job CRITICAL FAIL] Échec du rattrapage pour ${companyId}: ${error.message}`);
+  }
+};
+
 
 const sendEmailsInBackground = async (company, recipients, contentToSend) => {
     try {
@@ -185,60 +218,6 @@ const sendEmailsInBackground = async (company, recipients, contentToSend) => {
     } catch (error) {
         console.error(`[BG JOB CRITICAL FAIL] Erreur fatale lors de l'envoi d'emails pour ${company.name}: ${error.message}`);
     }
-};
-
-/**
- * MODIFIÉ : Tâche de fond pour valider TOUS les clients "En attente" d'une entreprise.
- */
-const triggerPendingValidation = async (companyId) => {
-  // Flag pour éviter les exécutions parallèles
-  if (global.isValidationRunning && global.isValidationRunning[companyId]) {
-      console.log(`[Validation Job] Le rattrapage est déjà en cours pour ${companyId}.`);
-      return;
-  }
-  if (!global.isValidationRunning) global.isValidationRunning = {};
-  global.isValidationRunning[companyId] = true;
-
-  console.log(`[Validation Job] DÉMARRAGE TÂCHE pour ${companyId}. Recherche des clients 'Pending'...`); // Log 1
-
-  try {
-    const pendingClients = await Client.find({ companyId: companyId, numberStatus: 'Pending' });
-
-    console.log(`[Validation Job] Trouvé ${pendingClients.length} clients 'Pending' pour ${companyId}.`); // Log 2
-
-    if (pendingClients.length === 0) {
-      global.isValidationRunning[companyId] = false;
-      return;
-    }
-
-    console.log(`[Validation Job] Démarrage de la boucle de validation...`); // Log 3
-
-    for (const client of pendingClients) {
-      // Re-vérifier au cas où un autre processus l'aurait validé entre temps
-      // Utilisation de findById pour être sûr
-      const currentClientState = await Client.findById(client._id).select('numberStatus whatsapp');
-
-      // Log pour voir ce qu'on trouve avant de valider
-      console.log(`[Validation Job] Traitement client ${client._id}. Statut actuel: ${currentClientState?.numberStatus}. Numéro: ${client.whatsapp}`); // Log 4
-
-      if (currentClientState && currentClientState.numberStatus === 'Pending') {
-          await validateAndUpdateClient(companyId, client._id, client.whatsapp);
-          // Pause de 0.5s pour ne pas surcharger l'API Twilio
-          await new Promise(resolve => setTimeout(resolve, 500));
-      } else {
-          console.log(`[Validation Job] Client ${client._id} n'est plus 'Pending', ignoré.`); // Log 5
-      }
-    }
-
-    console.log(`[Validation Job] Validation de rattrapage terminée pour ${companyId}.`); // Log 6
-
-  } catch (error) {
-    console.error(`[Validation Job CRITICAL FAIL] Échec du rattrapage pour ${companyId}: ${error.message}`);
-  } finally {
-      // S'assurer de toujours libérer le flag
-      if (global.isValidationRunning) global.isValidationRunning[companyId] = false;
-      console.log(`[Validation Job] Flag libéré pour ${companyId}.`); // Log 7
-  }
 };
 
 
@@ -329,7 +308,6 @@ app.put('/api/clients/:id', authMiddleware, async (req, res) => {
         );
 
         if (updatedClient.numberStatus === 'Pending') {
-            // Relance la validation si le numéro a changé ou s'il est resté 'Pending'
             validateAndUpdateClient(req.company.id, updatedClient._id, updatedClient.whatsapp);
         }
 
@@ -351,11 +329,15 @@ app.delete('/api/clients/:id', authMiddleware, async (req, res) => {
 
 // --- ROUTE DE DÉCLENCHEMENT DE VALIDATION (Rattrapage) ---
 app.post('/api/clients/trigger-pending-validation', authMiddleware, async (req, res) => {
-    // On répond immédiatement pour ne pas bloquer le frontend
-    res.status(202).json({ message: "Demande de validation des clients en attente reçue. La tâche s'exécute en arrière-plan." });
+    // 💡 Nous appelons la logique de rattrapage sur TOUTES les entreprises pour corriger le problème
+    // des clients mal associés, puis sur l'entreprise actuelle pour les cas normaux.
+    res.status(202).json({ message: "Lancement du rattrapage pour toutes les entreprises." });
 
-    // On lance la tâche de fond (sans await)
-    triggerPendingValidation(req.company.id);
+    // 1. Lancement du Cron Job (qui va balayer TOUTES les entreprises)
+    await runCronValidationJob();
+
+    // 2. Lancement spécifique pour l'entreprise actuelle (pour l'immédiateté)
+    runValidationCatchup(req.company.id); 
 });
 
 
@@ -434,7 +416,7 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
         } else if (surveyId) {
             const survey = await Survey.findById(surveyId);
             if (!survey) return res.status(404).json({ message: `Sondage avec ID ${surveyId} non trouvé.` });
-            const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`; // Adaptez ce lien si nécessaire
+            const surveyUrl = `https://client-app-j02r.onrender.com/survey/${survey._id}`; 
             contentToSend = `Veuillez répondre à notre sondage "${survey.title}" en cliquant sur ce lien : ${surveyUrl}`;
         } else {
             return res.status(400).json({ message: "Veuillez fournir un 'message' ou un 'surveyId'." });
@@ -451,12 +433,11 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             if (!sid || !token || !fromNumber) return res.status(400).json({ message: "Veuillez configurer vos identifiants Twilio." });
 
             const twilioClient = twilio(sid, token);
-            // C'est le SID de "copy_notification_service" qui est approuvé
-            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; // Assurez-vous que c'est le bon SID
+            const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; 
 
             const whatsappPromises = recipients.map(recipient => twilioClient.messages.create({
                 from: `whatsapp:${fromNumber}`,
-                to: `whatsapp:${recipient.e164Format}`, // On utilise le numéro E.164 validé
+                to: `whatsapp:${recipient.e164Format}`, 
                 contentSid: templateSid,
                 contentVariables: JSON.stringify({
                     '1': contentToSend
@@ -534,27 +515,33 @@ app.post('/api/public/surveys/:id/responses', async (req, res) => {
 // 8. TÂCHES AUTOMATISÉES (CRON JOBS)
 // =================================================================
 
+/**
+ * Fonction balayant TOUTES les entreprises pour lancer le rattrapage.
+ * (Utilisée par le Cron Job et par la route /trigger-pending-validation)
+ */
+const runCronValidationJob = async () => {
+    console.log('[CRON JOB] Démarrage de la validation globale de TOUS les numéros "Pending".');
+    try {
+        const allCompanies = await Company.find({}).select('_id name');
+        console.log(`[CRON JOB] ${allCompanies.length} entreprise(s) trouvée(s).`);
+
+        for (const company of allCompanies) {
+            console.log(`[CRON JOB] Lancement de la validation pour : ${company.name} (${company._id})`);
+            // On lance le rattrapage pour l'ID de cette entreprise
+            // (La fonction runValidationCatchup utilise le filtre companyId)
+            runValidationCatchup(company._id);
+        }
+        console.log('[CRON JOB] Tâches de validation lancées pour toutes les entreprises.');
+    } catch (error) {
+        console.error('[CRON JOB] Erreur critique lors du lancement des tâches de validation:', error);
+    }
+};
+
 // Tâche de validation des numéros 'Pending'
 // S'exécute tous les jours à minuit (fuseau horaire de Cotonou)
-cron.schedule('0 0 * * *', async () => {
-  console.log('[CRON JOB] Démarrage de la validation nocturne de TOUS les numéros "Pending".');
-  try {
-    const allCompanies = await Company.find({}).select('_id name');
-    console.log(`[CRON JOB] ${allCompanies.length} entreprise(s) trouvée(s).`);
-
-    for (const company of allCompanies) {
-      console.log(`[CRON JOB] Lancement de la validation pour : ${company.name} (${company._id})`);
-      // On lance la validation sans 'await' pour ne pas bloquer
-      // la boucle si une entreprise prend du temps.
-      triggerPendingValidation(company._id);
-    }
-    console.log('[CRON JOB] Tâches de validation lancées pour toutes les entreprises.');
-  } catch (error) {
-    console.error('[CRON JOB] Erreur critique lors du lancement des tâches de validation:', error);
-  }
-}, {
+cron.schedule('0 0 * * *', runCronValidationJob, {
   scheduled: true,
-  timezone: "Africa/Porto-Novo" // Assurez-vous que c'est le bon fuseau horaire
+  timezone: "Africa/Porto-Novo" 
 });
 
 
