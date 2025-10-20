@@ -155,36 +155,39 @@ const validateAndUpdateClient = async (companyId, clientId, phoneNumber) => {
 
 
 // 🔄 FONCTION DE RATTRAPAGE MODIFIÉE (SANS FLAG GLOBAL)
+// 🔄 FONCTION DE RATTRAPAGE MODIFIÉE (MAINTENANT ROBUSTE)
 const runValidationCatchup = async (companyId) => {
-  console.log(`[Validation Job] DÉMARRAGE RATTRAPAGE pour ${companyId}. Recherche des clients 'Pending'...`);
-
-  try {
-    // ⚡ Filtre par companyId pour que chaque entreprise gère ses propres clients
-    const pendingClients = await Client.find({ companyId: companyId, numberStatus: 'Pending' });
-
-    console.log(`[Validation Job] Trouvé ${pendingClients.length} clients 'Pending' pour ${companyId}.`);
-
-    if (pendingClients.length === 0) {
-      console.log(`[Validation Job] Rattrapage terminé pour ${companyId}: Aucun client trouvé.`);
-      return;
+    console.log(`[Validation Job] DÉMARRAGE RATTRAPAGE pour ${companyId}. Recherche des clients 'Pending' (Robuste)...`);
+  
+    try {
+      // ⚡ Utilisation de Regex pour ignorer la casse et les espaces éventuels
+      const pendingClients = await Client.find({ 
+          companyId: companyId, 
+          numberStatus: { $regex: /^Pending$/i } 
+      });
+  
+      console.log(`[Validation Job] Trouvé ${pendingClients.length} clients 'Pending' pour ${companyId}.`);
+  
+      if (pendingClients.length === 0) {
+        console.log(`[Validation Job] Rattrapage terminé pour ${companyId}: Aucun client trouvé.`);
+        return;
+      }
+  
+      for (const client of pendingClients) {
+          const currentClientState = await Client.findById(client._id).select('numberStatus whatsapp');
+  
+          if (currentClientState && currentClientState.numberStatus.toLowerCase() === 'pending') {
+              await validateAndUpdateClient(companyId, client._id, client.whatsapp);
+              await new Promise(resolve => setTimeout(resolve, 500)); // Pause 0.5s
+          }
+      }
+  
+      console.log(`[Validation Job] Validation de rattrapage terminée pour ${companyId}.`);
+  
+    } catch (error) {
+      console.error(`[Validation Job CRITICAL FAIL] Échec du rattrapage pour ${companyId}: ${error.message}`);
     }
-
-    for (const client of pendingClients) {
-        const currentClientState = await Client.findById(client._id).select('numberStatus whatsapp');
-
-        if (currentClientState && currentClientState.numberStatus === 'Pending') {
-            await validateAndUpdateClient(companyId, client._id, client.whatsapp);
-            await new Promise(resolve => setTimeout(resolve, 500)); // Pause 0.5s
-        }
-    }
-
-    console.log(`[Validation Job] Validation de rattrapage terminée pour ${companyId}.`);
-
-  } catch (error) {
-    console.error(`[Validation Job CRITICAL FAIL] Échec du rattrapage pour ${companyId}: ${error.message}`);
-  }
-};
-
+  };
 
 const sendEmailsInBackground = async (company, recipients, contentToSend) => {
     try {
