@@ -11,7 +11,8 @@ import 'react-toastify/dist/ReactToastify.css';
 import {
   FaPlus, FaTrash, FaChartPie, FaUserPlus, FaWpforms, FaPaperPlane,
   FaCog, FaSignOutAlt, FaEye, FaEnvelope, FaLock, FaBuilding, FaWhatsapp, FaKey, FaSignature, FaQuestionCircle,
-  FaUsers, FaTachometerAlt, FaEdit, FaBars, FaCheckCircle, FaSearch, FaListUl
+  FaUsers, FaTachometerAlt, FaEdit, FaBars, FaCheckCircle, FaSearch, FaListUl,
+  FaTimesCircle
 } from 'react-icons/fa';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title } from 'chart.js';
 import { Doughnut, Bar } from 'react-chartjs-2';
@@ -104,11 +105,12 @@ const PrivateRoute = ({ children }) => {
 };
 
 // --- COMPOSANT : Inscription (Register) ---
+// (Inchangé)
 function Register() {
   const [formData, setFormData] = useState({ name: '', whatsapp: '', email: '', password: '', passwordConfirm: '', emailAppPassword: '', twilioSid: '', twilioToken: '', twilioWhatsappNumber: '' });
   const navigate = useNavigate();
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
-  
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (formData.password !== formData.passwordConfirm) {
@@ -164,6 +166,7 @@ function Register() {
 }
 
 // --- COMPOSANT : Connexion (Login) ---
+// (Inchangé)
 function Login() {
   const [formData, setFormData] = useState({ name: '', password: '' });
   const { login } = useAuth();
@@ -212,6 +215,7 @@ function Login() {
 
 
 // --- COMPOSANT : Modale de confirmation ---
+// (Inchangé)
 function ConfirmationModal({ show, handleClose, onConfirm, title, body }) {
     return (
         <Modal show={show} onHide={handleClose} centered>
@@ -228,6 +232,7 @@ function ConfirmationModal({ show, handleClose, onConfirm, title, body }) {
 }
 
 // --- COMPOSANT : Modale d'ajout/édition de client ---
+// (Inchangé)
 function ClientModal({ show, handleClose, onClientSaved, clientToEdit }) {
     const [formData, setFormData] = useState({ name: '', whatsapp: '', email: '', status: 'Non Vérifié' });
 
@@ -279,6 +284,7 @@ function ClientModal({ show, handleClose, onClientSaved, clientToEdit }) {
 
 
 // --- COMPOSANT : Modale de création de sondage ---
+// (Inchangé)
 function CreateSurveyModal({ show, handleClose, onSurveyCreated }) {
     const [title, setTitle] = useState('');
     const [questions, setQuestions] = useState([{ text: '', type: 'text', options: [] }]);
@@ -292,7 +298,7 @@ function CreateSurveyModal({ show, handleClose, onSurveyCreated }) {
         if (field === 'type' && value === 'text') { newQuestions[index].options = []; }
         setQuestions(newQuestions);
     };
-    
+
     const handleOptionChange = (qIndex, oIndex, value) => {
         const newQuestions = [...questions];
         newQuestions[qIndex].options[oIndex] = value;
@@ -304,7 +310,7 @@ function CreateSurveyModal({ show, handleClose, onSurveyCreated }) {
         newQuestions[qIndex].options.push('');
         setQuestions(newQuestions);
     };
-    
+
     const handleRemoveOption = (qIndex, oIndex) => {
         const newQuestions = [...questions];
         newQuestions[qIndex].options.splice(oIndex, 1);
@@ -361,7 +367,8 @@ function CreateSurveyModal({ show, handleClose, onSurveyCreated }) {
     );
 }
 
-// --- NOUVEAU --- COMPOSANT : Modale d'envoi de communication améliorée ---
+// --- COMPOSANT : Modale d'envoi de communication ---
+// (Inchangé)
 function SendCommunicationModal({ show, handleClose, clients, surveys }) {
     const [channel, setChannel] = useState('email');
     const [contentType, setContentType] = useState('survey');
@@ -376,12 +383,13 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
         if (surveys.length > 0) {
             setSurveyId(surveys[0]._id);
         }
-    }, [surveys, show]);
+        setSelectedClients([]);
+    }, [surveys, show, channel]);
 
     const handleSelectClient = (clientId) => {
         setSelectedClients(prev => prev.includes(clientId) ? prev.filter(id => id !== clientId) : [...prev, clientId]);
     };
-    
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         const payload = { channel, recipientType };
@@ -395,7 +403,7 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
         }
         if (recipientType === 'status') payload.status = status;
         if (recipientType === 'selection') {
-            if (selectedClients.length === 0) return toast.warn("Veuillez sélectionner au moins un client.");
+            if (selectedClients.length === 0) return toast.warn("Veuillez sélectionner au moins un client valide.");
             payload.clientIds = selectedClients;
         }
         try {
@@ -407,10 +415,30 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
         }
     };
 
-    const filteredClients = clients.filter(client => 
+    const filteredClients = clients.filter(client =>
         client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         client.email.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
+    const isClientDisabled = (client) => {
+        if (channel === 'email') return false;
+        return client.numberStatus !== 'Valid';
+    };
+
+    const renderClientStatusIcon = (client) => {
+        if (channel === 'email') return null;
+
+        if (client.numberStatus === 'Valid') {
+            return <FaCheckCircle className="text-success ms-2" title="Numéro valide"/>;
+        }
+        if (client.numberStatus === 'Invalid') {
+            return <FaTimesCircle className="text-danger ms-2" title="Numéro invalide"/>;
+        }
+        if (client.numberStatus === 'Pending') {
+            return <Spinner animation="border" size="sm" className="text-muted ms-2" title="Validation en cours..."/>;
+        }
+        return null;
+    };
 
     return (
         <Modal show={show} onHide={handleClose} size="lg" centered>
@@ -425,7 +453,7 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
                         <Card.Body>
                             <Row>
                                 <Col>
-                                    <Card 
+                                    <Card
                                         className={`text-center p-3 h-100 card-lift channel-card ${channel === 'email' ? 'selected' : ''}`}
                                         onClick={() => setChannel('email')}>
                                         <FaEnvelope size={30} className="mx-auto mb-2 text-primary"/>
@@ -434,7 +462,7 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
                                     </Card>
                                 </Col>
                                 <Col>
-                                    <Card 
+                                    <Card
                                         className={`text-center p-3 h-100 card-lift channel-card ${channel === 'whatsapp' ? 'selected' : ''}`}
                                         onClick={() => setChannel('whatsapp')}>
                                         <FaWhatsapp size={30} className="mx-auto mb-2 text-success"/>
@@ -459,7 +487,7 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
                     <Card className="mb-4">
                         <Card.Header as="h5">Étape 3: Choisir les destinataires</Card.Header>
                         <Card.Body>
-                             <Form.Group className="mb-3"><Form.Label>Envoyer à</Form.Label><Form.Select value={recipientType} onChange={e => setRecipientType(e.target.value)}><option value="all">Tous les clients</option><option value="status">Par Statut</option><option value="selection">Sélectionner manuellement</option></Form.Select></Form.Group>
+                             <Form.Group className="mb-3"><Form.Label>Envoyer à</Form.Label><Form.Select value={recipientType} onChange={e => setRecipientType(e.target.value)}><option value="all">Tous les clients {channel === 'whatsapp' && '(N° valides)'}</option><option value="status">Par Statut {channel === 'whatsapp' && '(N° valides)'}</option><option value="selection">Sélectionner manuellement</option></Form.Select></Form.Group>
                              {recipientType === 'status' && (<Form.Group className="mb-3"><Form.Label>Statut du client</Form.Label><Form.Select value={status} onChange={e => setStatus(e.target.value)}><option>Vérifié</option><option>Non Vérifié</option></Form.Select></Form.Group>)}
                              {recipientType === 'selection' && (
                                 <>
@@ -469,12 +497,18 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
                                     </InputGroup>
                                     <ListGroup style={{maxHeight: '200px', overflowY: 'auto'}}>
                                         {filteredClients.length > 0 ? filteredClients.map(client => (
-                                            <ListGroup.Item key={client._id}>
-                                                <Form.Check 
+                                            <ListGroup.Item key={client._id} disabled={isClientDisabled(client)}>
+                                                <Form.Check
                                                     type="checkbox"
-                                                    label={`${client.name} (${channel === 'email' ? client.email : client.whatsapp})`}
+                                                    label={
+                                                        <>
+                                                          {client.name} ({channel === 'email' ? client.email : client.whatsapp})
+                                                          {renderClientStatusIcon(client)}
+                                                        </>
+                                                    }
                                                     checked={selectedClients.includes(client._id)}
                                                     onChange={() => handleSelectClient(client._id)}
+                                                    disabled={isClientDisabled(client)}
                                                 />
                                             </ListGroup.Item>
                                         )) : <p className="text-muted text-center p-3">Aucun client trouvé.</p>}
@@ -497,6 +531,7 @@ function SendCommunicationModal({ show, handleClose, clients, surveys }) {
 
 
 // --- COMPOSANT : Modale des résultats de sondage ---
+// (Inchangé)
 function SurveyResultsModal({ show, handleClose, surveyId }) {
     const [surveyData, setSurveyData] = useState(null); const [loading, setLoading] = useState(false);
     useEffect(() => {
@@ -505,7 +540,7 @@ function SurveyResultsModal({ show, handleClose, surveyId }) {
             api.get(`/surveys/${surveyId}/results`).then(res => setSurveyData(res.data)).catch(err => toast.error("Erreur de chargement des résultats")).finally(() => setLoading(false));
         }
     }, [surveyId]);
-    
+
     const renderChart = (questionIndex) => {
         const stats = surveyData?.stats?.[questionIndex];
         if (!stats) return null;
@@ -552,50 +587,85 @@ function SurveyResultsModal({ show, handleClose, surveyId }) {
 // =================================================================
 
 
-// --- Page: Gestion des clients ---
+// --- MODIFIÉ --- Page: Gestion des clients ---
+// --- MODIFIÉ --- Page: Gestion des clients ---
+// --- MODIFIÉ --- Page: Gestion des clients ---
 function Clients() {
     const [clients, setClients] = useState([]);
-    const [surveys, setSurveys] = useState([]); // AJOUT: pour passer aux modales
+    const [surveys, setSurveys] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showClientModal, setShowClientModal] = useState(false);
-    const [showCommModal, setShowCommModal] = useState(false); // AJOUT: état pour la modale de comm
+    const [showCommModal, setShowCommModal] = useState(false);
     const [clientToEdit, setClientToEdit] = useState(null);
     const [clientToDelete, setClientToDelete] = useState(null);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                // On charge les clients ET les sondages pour la modale de communication
-                const [clientsRes, surveysRes] = await Promise.all([
-                    api.get('/clients'),
-                    api.get('/surveys')
-                ]);
-                setClients(clientsRes.data);
-                setSurveys(surveysRes.data);
-            } catch (error) {
-                toast.error("Erreur de chargement des données.");
-            } finally {
-                setLoading(false);
+    // --- CORRECTION FINALE : Fonction pour charger et déclencher la validation si nécessaire ---
+    const fetchData = async () => {
+        try {
+            const [clientsRes, surveysRes] = await Promise.all([
+                api.get('/clients'),
+                api.get('/surveys')
+            ]);
+            
+            const fetchedClients = clientsRes.data;
+            setClients(fetchedClients);
+            setSurveys(surveysRes.data);
+
+            // Vérifier s'il reste des clients 'Pending'
+            const hasPending = fetchedClients.some(c => c.numberStatus === 'Pending');
+            if (hasPending) {
+                console.log("Clients en attente détectés. Déclenchement de la validation globale...");
+                
+                // Appel de la route qui lance le balayage de toutes les entreprises dans le backend
+                api.post('/clients/trigger-pending-validation').catch(err => {
+                    console.error("Erreur lors du déclenchement de la validation:", err);
+                });
             }
-        };
+
+        } catch (error) {
+            toast.error("Erreur de chargement des données.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // CORRECTION FINALE : Charger les données et relancer la vérification toutes les 5 secondes 
+    useEffect(() => {
         fetchData();
+
+        // Rechargement toutes les 5 secondes pour voir les mises à jour de validation immédiates 
+        const intervalId = setInterval(fetchData, 5000); 
+        
+        return () => clearInterval(intervalId);
     }, []);
 
+    // --- CORRECTION FINALE : Mise à jour de l'état local après ajout/édition ---
     const handleClientSaved = (savedClient) => {
-        if (clientToEdit) {
-            setClients(clients.map(c => c._id === savedClient._id ? savedClient : c));
-        } else {
-            setClients([...clients, savedClient]);
-        }
+        setClients(prevClients => {
+            const index = prevClients.findIndex(c => c._id === savedClient._id);
+            if (index !== -1) {
+                // Édition : Remplacer l'ancien client par le nouveau
+                return prevClients.map((c, i) => i === index ? savedClient : c);
+            } else {
+                // Ajout : Ajouter le nouveau client à la liste
+                return [savedClient, ...prevClients];
+            }
+        });
+        
+        // Relancer fetchData après un court délai pour assurer que la validation du nouveau client est lancée
+        setTimeout(() => fetchData(), 500); 
         setClientToEdit(null);
     };
+
+    // ... Reste du composant Clients (handleEditClick, handleDeleteClick, confirmDelete, etc.) ...
+    // Le reste du code du composant (à partir de handleEditClick) reste le même que dans votre App.js actuel.
 
     const handleEditClick = (client) => {
         setClientToEdit(client);
         setShowClientModal(true);
     };
-
+    // [etc... le reste du composant]
     const handleDeleteClick = (client) => {
         setClientToDelete(client);
         setShowDeleteModal(true);
@@ -613,7 +683,19 @@ function Clients() {
             toast.error("Erreur lors de la suppression.");
         }
     };
-    
+
+    const renderNumberStatusBadge = (status) => {
+        switch (status) {
+            case 'Valid':
+                return <span className="badge bg-success">Valide</span>;
+            case 'Invalid':
+                return <span className="badge bg-danger">Invalide</span>;
+            case 'Pending':
+            default:
+                return <span className="badge bg-secondary">En attente</span>;
+        }
+    };
+
     return (
         <motion.div initial="initial" animate="in" exit="out" variants={pageVariants}>
             <div className="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
@@ -636,37 +718,45 @@ function Clients() {
                     <Card.Body>
                         <Table responsive hover className="align-middle">
                             <thead className="table-light">
-                                <tr><th>Nom</th><th>Email</th><th>WhatsApp</th><th>Statut</th><th className="text-center">Actions</th></tr>
+                                <tr>
+                                    <th>Nom</th>
+                                    <th>Email</th>
+                                    <th>WhatsApp</th>
+                                    <th>Statut N°</th>
+                                    <th>Statut</th>
+                                    <th className="text-center">Actions</th>
+                                </tr>
                             </thead>
                             <motion.tbody initial="hidden" animate="visible" variants={listVariants}>
-                                {loading ? (<tr><td colSpan="5" className="text-center p-5"><Spinner animation="border" /></td></tr>)
+                                {loading ? (<tr><td colSpan="6" className="text-center p-5"><Spinner animation="border" /></td></tr>)
                                  : clients.length > 0 ? clients.map(client => (
                                     <motion.tr key={client._id} variants={itemVariants}>
                                         <td>{client.name}</td>
                                         <td>{client.email}</td>
                                         <td>{client.whatsapp}</td>
+                                        <td>{renderNumberStatusBadge(client.numberStatus)}</td>
                                         <td><span className={`badge bg-${client.status === 'Vérifié' ? 'success' : 'warning'}`}>{client.status}</span></td>
                                         <td className="text-center">
                                             <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="btn btn-sm btn-outline-primary me-2" onClick={() => handleEditClick(client)}><FaEdit /></motion.button>
                                             <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="btn btn-sm btn-outline-danger" onClick={() => handleDeleteClick(client)}><FaTrash /></motion.button>
                                         </td>
                                     </motion.tr>
-                                )) : (<tr><td colSpan="5" className="text-center p-4 text-muted">Aucun client.</td></tr>)}
+                                )) : (<tr><td colSpan="6" className="text-center p-4 text-muted">Aucun client.</td></tr>)}
                             </motion.tbody>
                         </Table>
                     </Card.Body>
                 </Card>
             </motion.div>
-            
-            <ClientModal 
-                show={showClientModal} 
-                handleClose={() => setShowClientModal(false)} 
+
+            <ClientModal
+                show={showClientModal}
+                handleClose={() => setShowClientModal(false)}
                 onClientSaved={handleClientSaved}
                 clientToEdit={clientToEdit}
             />
-            {clientToDelete && <ConfirmationModal 
-                show={showDeleteModal} 
-                handleClose={() => setShowDeleteModal(false)} 
+            {clientToDelete && <ConfirmationModal
+                show={showDeleteModal}
+                handleClose={() => setShowDeleteModal(false)}
                 onConfirm={confirmDelete}
                 title="Confirmer la Suppression"
                 body={`Êtes-vous sûr de vouloir supprimer le client "${clientToDelete.name}" ? Cette action est irréversible.`}
@@ -682,6 +772,7 @@ function Clients() {
 }
 
 // --- Page: Gestion des Sondages ---
+// (Inchangé)
 function SurveysPage() {
     const [surveys, setSurveys] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -743,10 +834,11 @@ function SurveysPage() {
 }
 
 // --- COMPOSANT : Tableau de bord (Dashboard) ---
+// (Inchangé)
 function Dashboard() {
   const [stats, setStats] = useState({ clients: 0, surveys: 0 });
   const [loading, setLoading] = useState(true);
-  
+
   useEffect(() => {
     const fetchData = async () => {
         try {
@@ -789,10 +881,11 @@ function Dashboard() {
 }
 
 // --- COMPOSANT : Page des paramètres ---
+// (Inchangé)
 function Settings() {
     const [formData, setFormData] = useState({ emailAppPassword: '', twilioSid: '', twilioToken: '', twilioWhatsappNumber: '' });
     const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
-    
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         const updatedSettings = Object.fromEntries(Object.entries(formData).filter(([_, value]) => value.trim() !== ''));
@@ -836,6 +929,7 @@ function Settings() {
 }
 
 // --- COMPOSANT : Page publique de sondage ---
+// (Inchangé)
 function PublicSurvey() {
     const { surveyId } = useParams();
     const [survey, setSurvey] = useState(null);
@@ -872,7 +966,7 @@ function PublicSurvey() {
     };
 
     if (loading) return <Container className="text-center mt-5 vh-100 d-flex align-items-center justify-content-center"><Spinner animation="border" variant="primary" style={{width: '3rem', height: '3rem'}} /></Container>;
-    
+
     if (error) return <Container className="mt-5"><Alert variant="danger">{error}</Alert></Container>;
 
     if (submitted) return (
@@ -902,7 +996,7 @@ function PublicSurvey() {
                         {survey?.questions.map((q, index) => (
                             <Form.Group key={index} className="mb-4">
                                 <Form.Label><strong>Question {index + 1}:</strong> {q.text}</Form.Label>
-                                {q.type === 'text' ? ( <Form.Control as="textarea" rows={2} value={answers[index]} onChange={(e) => handleAnswerChange(index, e.target.value)} required />) 
+                                {q.type === 'text' ? ( <Form.Control as="textarea" rows={2} value={answers[index]} onChange={(e) => handleAnswerChange(index, e.target.value)} required />)
                                 : (
                                     <div className="mt-2">{q.options.map((option, oIndex) => ( <Form.Check type="radio" key={oIndex} id={`q${index}-o${oIndex}`} label={option} name={`question-${index}`} value={option} onChange={(e) => handleAnswerChange(index, e.target.value)} required /> ))}</div>
                                 )}
@@ -921,7 +1015,8 @@ function PublicSurvey() {
 // --- COMPOSANTS DE LAYOUT ---
 // =================================================================
 
-// --- NOUVEAU --- COMPOSANT : Sidebar ---
+// --- COMPOSANT : Sidebar ---
+// (Inchangé)
 const Sidebar = ({ isSidebarOpen }) => {
     const { companyName } = useAuth();
     const navItems = [
@@ -949,7 +1044,8 @@ const Sidebar = ({ isSidebarOpen }) => {
     );
 }
 
-// --- NOUVEAU --- COMPOSANT : AppHeader ---
+// --- COMPOSANT : AppHeader ---
+// (Inchangé)
 const AppHeader = ({ toggleSidebar }) => {
     const { companyName, logout } = useAuth();
     return (
@@ -978,7 +1074,8 @@ const AppHeader = ({ toggleSidebar }) => {
     );
 };
 
-// --- NOUVEAU --- LAYOUTS ---
+// --- LAYOUTS ---
+// (Inchangés)
 const AuthLayout = ({ children }) => (
     <Container fluid className="d-flex align-items-center justify-content-center auth-container">
         <AnimatePresence mode="wait">
@@ -1002,7 +1099,7 @@ const DashboardLayout = () => {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
-    
+
     useEffect(() => {
         if(window.innerWidth < 992) setSidebarOpen(false);
     }, [location]);
@@ -1038,6 +1135,7 @@ function App() {
   return (
     <>
     <style type="text/css">{`
+        /* (CSS Inchangé) */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap');
         :root {
             --primary-color: #0d6efd;
@@ -1056,15 +1154,11 @@ function App() {
         .btn { border-radius: 8px; font-weight: 500; transition: all 0.2s ease-in-out; }
         .modal-content { border-radius: 15px; }
         .Toastify__toast { border-radius: 12px; }
-
-        /* Auth Layout */
         .auth-container {
             min-height: 100vh;
             background-color: #f4f7f6;
             background-image: linear-gradient(to top, #dfe9f3 0%, white 100%);
         }
-
-        /* Dashboard Layout */
         .dashboard-layout { display: flex; min-height: 100vh; }
         .sidebar {
             width: 260px;
@@ -1118,8 +1212,6 @@ function App() {
         .align-middle {
           vertical-align: middle;
         }
-        
-        /* NOUVEAU CSS pour la modale de communication */
         .channel-card {
             cursor: pointer;
             position: relative;
@@ -1133,8 +1225,12 @@ function App() {
             top: 10px;
             right: 10px;
         }
+        .list-group-item.disabled, .list-group-item:disabled {
+            background-color: #f8f9fa;
+            color: #adb5bd;
+            cursor: not-allowed;
+        }
 
-        /* Responsive Sidebar */
         @media (max-width: 991.98px) {
             .sidebar {
                 position: fixed;
