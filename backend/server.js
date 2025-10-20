@@ -393,6 +393,7 @@ app.get('/api/surveys/:id/results', authMiddleware, async (req, res) => {
 });
 
 // --- Route de Communication ---
+// --- Route de Communication ---
 app.post('/api/communications/send', authMiddleware, async (req, res) => {
     try {
         const company = await Company.findById(req.company.id);
@@ -445,14 +446,25 @@ app.post('/api/communications/send', authMiddleware, async (req, res) => {
             const twilioClient = twilio(sid, token);
             const templateSid = 'HXec8d194a315a6f200f9a9f5bf975b9b6'; 
 
-            const whatsappPromises = recipients.map(recipient => twilioClient.messages.create({
-                from: `whatsapp:${fromNumber}`,
-                to: `whatsapp:${recipient.e164Format}`, 
-                contentSid: templateSid,
-                contentVariables: JSON.stringify({
-                    '1': contentToSend
-                })
-            }));
+            const whatsappPromises = recipients.map(recipient => {
+                const messageConfig = {
+                    from: `whatsapp:${fromNumber}`,
+                    to: `whatsapp:${recipient.e164Format}`, 
+                };
+
+                if (surveyId) {
+                    // C'est un SONDAGE, on utilise le template et les variables
+                    messageConfig.contentSid = templateSid;
+                    messageConfig.contentVariables = JSON.stringify({
+                        '1': contentToSend
+                    });
+                } else {
+                    // C'est un MESSAGE SIMPLE, on utilise le body standard (fenêtre 24h requise)
+                    messageConfig.body = contentToSend;
+                }
+                
+                return twilioClient.messages.create(messageConfig);
+            });
 
             const results = await Promise.allSettled(whatsappPromises);
             const sentCount = results.filter(r => r.status === 'fulfilled').length;
