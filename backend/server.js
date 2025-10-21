@@ -50,11 +50,15 @@ const CompanySchema = new mongoose.Schema({
 const Company = mongoose.model('Company', CompanySchema);
 
 const ClientSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  whatsapp: { type: String, required: true },
-  email: { type: String, required: true },
-  status: { type: String, enum: ['Vérifié', 'Non Vérifié'], required: true },
-  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
+    name: { type: String, required: true },
+    whatsapp: { type: String, required: true },
+    email: { type: String /*, required: true */ }, // MODIFIÉ : Email n'est plus requis
+    status: { 
+      type: String, 
+      enum: ['Vérifié', 'Non Vérifié'], 
+      default: 'Non Vérifié' // MODIFIÉ : Ajout de 'default' et suppression de 'required'
+    },
+    companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', required: true },
   numberStatus: {
     type: String,
     enum: ['Pending', 'Valid', 'Invalid'],
@@ -276,15 +280,25 @@ app.post('/api/auth/login', async (req, res) => {
 
 // --- Routes des Clients ---
 app.post('/api/clients', authMiddleware, async (req, res) => {
-  try {
-    const { name, whatsapp, email, status } = req.body;
-    const newClient = new Client({ name, whatsapp, email, status, companyId: req.company.id });
-    await newClient.save();
-
-    validateAndUpdateClient(req.company.id, newClient._id, newClient.whatsapp);
-
-    res.status(201).json(newClient);
-  } catch (error) {
+    try {
+      const { name, whatsapp, email, status } = req.body;
+      
+      // MODIFIÉ : Utilise les valeurs du body ou des valeurs par défaut/vides si elles sont absentes
+      const clientData = { 
+        name, 
+        whatsapp, 
+        email: email || '', 
+        status: status || 'Non Vérifié', 
+        companyId: req.company.id 
+      };
+  
+      const newClient = new Client(clientData);
+      await newClient.save();
+  
+      validateAndUpdateClient(req.company.id, newClient._id, newClient.whatsapp);
+  
+      res.status(201).json(newClient);
+    } catch (error) {
     res.status(500).json({ message: 'Erreur du serveur.', error: error.message });
   }
 });
