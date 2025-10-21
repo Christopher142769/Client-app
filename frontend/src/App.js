@@ -272,9 +272,9 @@ function ClientModal({ show, handleClose, onClientSaved, clientToEdit }) {
             <Modal.Body>
                 <Form onSubmit={handleSubmit}>
                     <Form.Group className="mb-3"><Form.Label>Nom</Form.Label><Form.Control type="text" name="name" value={formData.name} onChange={handleChange} required /></Form.Group>
-                    <Form.Group className="mb-3"><Form.Label>Email</Form.Label><Form.Control type="email" name="email" value={formData.email} onChange={handleChange} required /></Form.Group>
+                    <Form.Group className="mb-3"><Form.Label>Email (Optionnel)</Form.Label><Form.Control type="email" name="email" value={formData.email} onChange={handleChange} /></Form.Group>
                     <Form.Group className="mb-3"><Form.Label>WhatsApp</Form.Label><Form.Control type="text" name="whatsapp" value={formData.whatsapp} placeholder="+22912345678" onChange={handleChange} required /></Form.Group>
-                    <Form.Group className="mb-3"><Form.Label>Statut</Form.Label><Form.Select name="status" value={formData.status} onChange={handleChange}><option>Non Vérifié</option><option>Vérifié</option></Form.Select></Form.Group>
+                    <Form.Group className="mb-3"><Form.Label>Statut (Optionnel)</Form.Label><Form.Select name="status" value={formData.status} onChange={handleChange}><option>Non Vérifié</option><option>Vérifié</option></Form.Select></Form.Group>
                     <Button variant="primary" type="submit" className="w-100">{clientToEdit ? 'Mettre à jour' : 'Ajouter le client'}</Button>
                 </Form>
             </Modal.Body>
